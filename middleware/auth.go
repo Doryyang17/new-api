@@ -302,60 +302,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 
 func TokenAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		// 先检测是否为ws
-		if c.Request.Header.Get("Sec-WebSocket-Protocol") != "" {
-			// Sec-WebSocket-Protocol: realtime, openai-insecure-api-key.sk-xxx, openai-beta.realtime-v1
-			// read sk from Sec-WebSocket-Protocol
-			key := c.Request.Header.Get("Sec-WebSocket-Protocol")
-			parts := strings.Split(key, ",")
-			for _, part := range parts {
-				part = strings.TrimSpace(part)
-				if strings.HasPrefix(part, "openai-insecure-api-key") {
-					key = strings.TrimPrefix(part, "openai-insecure-api-key.")
-					break
-				}
-			}
-			c.Request.Header.Set("Authorization", "Bearer "+key)
-		}
-		// 检查path包含/v1/messages 或 /v1/models
-		if strings.Contains(c.Request.URL.Path, "/v1/messages") || strings.Contains(c.Request.URL.Path, "/v1/models") {
-			anthropicKey := c.Request.Header.Get("x-api-key")
-			if anthropicKey != "" {
-				c.Request.Header.Set("Authorization", "Bearer "+anthropicKey)
-			}
-		}
-		// gemini api 从query中获取key
-		if strings.HasPrefix(c.Request.URL.Path, "/v1beta/models") ||
-			strings.HasPrefix(c.Request.URL.Path, "/v1beta/openai/models") ||
-			strings.HasPrefix(c.Request.URL.Path, "/v1/models/") {
-			skKey := c.Query("key")
-			if skKey != "" {
-				c.Request.Header.Set("Authorization", "Bearer "+skKey)
-			}
-			// 从x-goog-api-key header中获取key
-			xGoogKey := c.Request.Header.Get("x-goog-api-key")
-			if xGoogKey != "" {
-				c.Request.Header.Set("Authorization", "Bearer "+xGoogKey)
-			}
-		}
-		key := c.Request.Header.Get("Authorization")
-		parts := make([]string, 0)
-		if strings.HasPrefix(key, "Bearer ") || strings.HasPrefix(key, "bearer ") {
-			key = strings.TrimSpace(key[7:])
-		}
-		if key == "" || key == "midjourney-proxy" {
-			key = c.Request.Header.Get("mj-api-secret")
-			if strings.HasPrefix(key, "Bearer ") || strings.HasPrefix(key, "bearer ") {
-				key = strings.TrimSpace(key[7:])
-			}
-			key = strings.TrimPrefix(key, "sk-")
-			parts = strings.Split(key, "-")
-			key = parts[0]
-		} else {
-			key = strings.TrimPrefix(key, "sk-")
-			parts = strings.Split(key, "-")
-			key = parts[0]
-		}
+		key, parts := tokenKeyFromRequest(c)
 		token, err := model.ValidateUserToken(key)
 		if token != nil {
 			id := c.GetInt("id")
@@ -431,6 +378,64 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		c.Next()
 	}
+}
+
+func tokenKeyFromRequest(c *gin.Context) (string, []string) {
+	// 先检测是否为ws
+	if c.Request.Header.Get("Sec-WebSocket-Protocol") != "" {
+		// Sec-WebSocket-Protocol: realtime, openai-insecure-api-key.sk-xxx, openai-beta.realtime-v1
+		// read sk from Sec-WebSocket-Protocol
+		key := c.Request.Header.Get("Sec-WebSocket-Protocol")
+		parts := strings.Split(key, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(part, "openai-insecure-api-key") {
+				key = strings.TrimPrefix(part, "openai-insecure-api-key.")
+				break
+			}
+		}
+		c.Request.Header.Set("Authorization", "Bearer "+key)
+	}
+	// 检查path包含/v1/messages 或 /v1/models
+	if strings.Contains(c.Request.URL.Path, "/v1/messages") || strings.Contains(c.Request.URL.Path, "/v1/models") {
+		anthropicKey := c.Request.Header.Get("x-api-key")
+		if anthropicKey != "" {
+			c.Request.Header.Set("Authorization", "Bearer "+anthropicKey)
+		}
+	}
+	// gemini api 从query中获取key
+	if strings.HasPrefix(c.Request.URL.Path, "/v1beta/models") ||
+		strings.HasPrefix(c.Request.URL.Path, "/v1beta/openai/models") ||
+		strings.HasPrefix(c.Request.URL.Path, "/v1/models/") {
+		skKey := c.Query("key")
+		if skKey != "" {
+			c.Request.Header.Set("Authorization", "Bearer "+skKey)
+		}
+		// 从x-goog-api-key header中获取key
+		xGoogKey := c.Request.Header.Get("x-goog-api-key")
+		if xGoogKey != "" {
+			c.Request.Header.Set("Authorization", "Bearer "+xGoogKey)
+		}
+	}
+	key := c.Request.Header.Get("Authorization")
+	parts := make([]string, 0)
+	if strings.HasPrefix(key, "Bearer ") || strings.HasPrefix(key, "bearer ") {
+		key = strings.TrimSpace(key[7:])
+	}
+	if key == "" || key == "midjourney-proxy" {
+		key = c.Request.Header.Get("mj-api-secret")
+		if strings.HasPrefix(key, "Bearer ") || strings.HasPrefix(key, "bearer ") {
+			key = strings.TrimSpace(key[7:])
+		}
+		key = strings.TrimPrefix(key, "sk-")
+		parts = strings.Split(key, "-")
+		key = parts[0]
+	} else {
+		key = strings.TrimPrefix(key, "sk-")
+		parts = strings.Split(key, "-")
+		key = parts[0]
+	}
+	return key, parts
 }
 
 func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) error {

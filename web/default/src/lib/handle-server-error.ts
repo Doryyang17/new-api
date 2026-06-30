@@ -20,7 +20,11 @@ import { AxiosError } from 'axios'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 
+import { isSystemCurfewError } from './system-availability'
+
 export function handleServerError(error: unknown) {
+  if (isSystemCurfewError(error)) return
+
   // eslint-disable-next-line no-console
   console.log(error)
 

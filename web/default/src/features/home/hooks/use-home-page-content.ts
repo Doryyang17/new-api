@@ -1,3 +1,4 @@
+import i18next from 'i18next'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -17,26 +18,44 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useState } from 'react'
-import i18next from 'i18next'
 import { toast } from 'sonner'
+
 import { isHttpUrl } from '@/lib/content-format'
+import { isSystemCurfewError } from '@/lib/system-availability'
+
 import { getHomePageContent } from '../api'
 import type { HomePageContentResult } from '../types'
 
 const STORAGE_KEY = 'home_page_content'
 
+type UseHomePageContentOptions = {
+  enabled?: boolean
+}
+
 /**
  * Hook to load and manage custom home page content
  * Supports both Markdown/HTML content and iframe URLs
  */
-export function useHomePageContent(): HomePageContentResult {
+export function useHomePageContent(
+  options: UseHomePageContentOptions = {}
+): HomePageContentResult {
+  const enabled = options.enabled ?? true
   const [content, setContent] = useState<string>('')
   const [isLoaded, setIsLoaded] = useState(false)
 
   useEffect(() => {
     let mounted = true
 
+    if (!enabled) {
+      setContent('')
+      setIsLoaded(true)
+      return () => {
+        mounted = false
+      }
+    }
+
     const loadContent = async () => {
+      setIsLoaded(false)
       // Load from localStorage first for immediate display
       const cached = localStorage.getItem(STORAGE_KEY)
       if (cached && mounted) {
@@ -59,6 +78,10 @@ export function useHomePageContent(): HomePageContentResult {
         }
       } catch (error) {
         if (!mounted) return
+        if (isSystemCurfewError(error)) {
+          setContent('')
+          return
+        }
         // eslint-disable-next-line no-console
         console.error('Failed to load home page content:', error)
         toast.error(i18next.t('Failed to load home page content'))
@@ -74,7 +97,7 @@ export function useHomePageContent(): HomePageContentResult {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [enabled])
 
   const isUrl = isHttpUrl(content)
 

@@ -16,9 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export { CTA } from './sections/cta'
-export { CurfewHome } from './curfew-home'
-export { Features } from './sections/features'
-export { Hero } from './sections/hero'
-export { HowItWorks } from './sections/how-it-works'
-export { Stats } from './sections/stats'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+
+import { CUSTOM_DEFAULT_SECTION } from '@/features/system-settings/custom/section-registry.tsx'
+
+export const Route = createFileRoute('/_authenticated/system-settings/custom/')(
+  {
+    beforeLoad: () => {
+      throw redirect({
+        to: '/system-settings/custom/$section',
+        params: { section: CUSTOM_DEFAULT_SECTION },
+      })
+    },
+  }
+)

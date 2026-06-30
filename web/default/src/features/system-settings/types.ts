@@ -361,6 +361,14 @@ export type OperationsSettings = {
   'perf_metrics_setting.retention_days': number
 }
 
+export type CustomSettings = {
+  'availability_setting.enabled': boolean
+  'availability_setting.unavailable_start': string
+  'availability_setting.unavailable_end': string
+  'availability_setting.timezone': string
+  'availability_setting.message': string
+}
+
 export type SecuritySettings = {
   ModelRequestRateLimitEnabled: boolean
   ModelRequestRateLimitCount: number

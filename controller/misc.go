@@ -121,6 +121,17 @@ func GetStatus(c *gin.Context) {
 		"privacy_policy_enabled":      legalSetting.PrivacyPolicy != "",
 		"checkin_enabled":             operation_setting.GetCheckinSetting().Enabled,
 	}
+	availabilityStatus := system_setting.GetAvailabilityStatus()
+	data["system_availability"] = gin.H{
+		"enabled":             availabilityStatus.Enabled,
+		"unavailable":         availabilityStatus.Unavailable,
+		"message":             availabilityStatus.Message,
+		"code":                availabilityStatus.Code,
+		"timezone":            availabilityStatus.Timezone,
+		"unavailable_start":   availabilityStatus.UnavailableStart,
+		"unavailable_end":     availabilityStatus.UnavailableEnd,
+		"retry_after_seconds": availabilityStatus.RetryAfterSeconds,
+	}
 
 	// 根据启用状态注入可选内容
 	if cs.ApiInfoEnabled {

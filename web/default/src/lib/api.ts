@@ -19,7 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 import axios, { type AxiosRequestConfig } from 'axios'
 import { t } from 'i18next'
 import { toast } from 'sonner'
+
 import { useAuthStore } from '@/stores/auth-store'
+
+import {
+  isSystemCurfewError,
+  markSystemCurfewFromError,
+  SYSTEM_CURFEW_CODE,
+  syncSystemAvailabilityFromStatus,
+} from './system-availability'
 
 declare module 'axios' {
   export interface AxiosRequestConfig {
@@ -89,6 +97,9 @@ api.interceptors.response.use(
       typeof response.data.success === 'boolean'
     ) {
       if (!response.data.success) {
+        if (response.data.code === SYSTEM_CURFEW_CODE) {
+          return response
+        }
         // Show error toast for business failures
         const msg = response.data.message || t('Request failed')
         toast.error(msg)
@@ -99,6 +110,11 @@ api.interceptors.response.use(
   (error) => {
     const skip = error?.config?.skipErrorHandler
     const status = error?.response?.status
+
+    if (isSystemCurfewError(error)) {
+      markSystemCurfewFromError(error)
+      return Promise.reject(error)
+    }
 
     if (status === 401) {
       try {
@@ -211,8 +227,10 @@ export async function getUserGroups(): Promise<{
 
 // Get system status
 export async function getStatus() {
-  const res = await api.get('/api/status')
-  return res.data?.data as Record<string, unknown>
+  const res = await api.get('/api/status', { skipErrorHandler: true })
+  const status = res.data?.data as Record<string, unknown>
+  syncSystemAvailabilityFromStatus(status)
+  return status
 }
 
 // Get system notice

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -22,16 +23,84 @@ import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
 import { RichContent } from '@/components/rich-content'
 import { isLikelyHtml } from '@/lib/content-format'
+import { getStatus } from '@/lib/api'
+import {
+  getSystemAvailabilityRefreshDelayMs,
+  isSystemCurfewActive,
+  subscribeSystemAvailability,
+} from '@/lib/system-availability'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { CTA, Features, Hero, HowItWorks, Stats } from './components'
+import {
+  CTA,
+  CurfewHome,
+  Features,
+  Hero,
+  HowItWorks,
+  Stats,
+} from './components'
 import { useHomePageContent } from './hooks'
 
 export function Home() {
   const { t } = useTranslation()
   const { auth } = useAuthStore()
   const isAuthenticated = !!auth.user
-  const { content, isLoaded, isUrl } = useHomePageContent()
+  const [curfewActive, setCurfewActive] = useState(isSystemCurfewActive)
+  const { content, isLoaded, isUrl } = useHomePageContent({
+    enabled: !curfewActive,
+  })
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let disposed = false
+
+    function clearRefreshTimer() {
+      if (timer) {
+        clearTimeout(timer)
+        timer = undefined
+      }
+    }
+
+    function scheduleRefresh() {
+      clearRefreshTimer()
+      if (disposed) return
+      timer = setTimeout(
+        refreshAvailabilityStatus,
+        getSystemAvailabilityRefreshDelayMs()
+      )
+    }
+
+    function syncCurfewState() {
+      setCurfewActive(isSystemCurfewActive())
+      scheduleRefresh()
+    }
+
+    async function refreshAvailabilityStatus() {
+      if (disposed) return
+      try {
+        await getStatus()
+      } catch {
+        /* keep the current status and try again on the next timer */
+      }
+      syncCurfewState()
+    }
+
+    syncCurfewState()
+    const unsubscribe = subscribeSystemAvailability(syncCurfewState)
+    return () => {
+      disposed = true
+      clearRefreshTimer()
+      unsubscribe()
+    }
+  }, [])
+
+  if (curfewActive) {
+    return (
+      <PublicLayout showMainContainer={false}>
+        <CurfewHome />
+      </PublicLayout>
+    )
+  }
 
   if (!isLoaded) {
     return (

@@ -34,6 +34,8 @@ import {
   getSystemName,
   showError,
   setStatusData,
+  isSystemCurfewError,
+  syncSystemAvailabilityFromStatus,
 } from '../../helpers';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -92,12 +94,16 @@ const PageLayout = () => {
       const res = await API.get('/api/status');
       const { success, data } = res.data;
       if (success) {
+        syncSystemAvailabilityFromStatus(data);
         statusDispatch({ type: 'set', payload: data });
         setStatusData(data);
       } else {
         showError('Unable to connect to server');
       }
     } catch (error) {
+      if (isSystemCurfewError(error)) {
+        return;
+      }
       showError('Failed to load status');
     }
   };

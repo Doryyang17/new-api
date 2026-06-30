@@ -34,6 +34,7 @@ import {
   CreditCard,
   Server,
   Activity,
+  PanelsTopLeft,
 } from 'lucide-react';
 
 import SystemSetting from '../../components/settings/SystemSetting';
@@ -49,6 +50,7 @@ import DrawingSetting from '../../components/settings/DrawingSetting';
 import PaymentSetting from '../../components/settings/PaymentSetting';
 import ModelDeploymentSetting from '../../components/settings/ModelDeploymentSetting';
 import PerformanceSetting from '../../components/settings/PerformanceSetting';
+import CustomSetting from '../../components/settings/CustomSetting';
 
 const Setting = () => {
   const { t } = useTranslation();
@@ -67,6 +69,16 @@ const Setting = () => {
       ),
       content: <OperationSetting />,
       itemKey: 'operation',
+    });
+    panes.push({
+      tab: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <PanelsTopLeft size={18} />
+          {t('定制化功能')}
+        </span>
+      ),
+      content: <CustomSetting />,
+      itemKey: 'custom',
     });
     panes.push({
       tab: (

@@ -25,7 +25,18 @@ import {
   ScrollList,
   ScrollItem,
 } from '@douyinfe/semi-ui';
-import { API, showError, copy, showSuccess } from '../../helpers';
+import {
+  API,
+  showError,
+  copy,
+  showSuccess,
+  getSystemAvailabilityRefreshDelayMs,
+  getSystemCurfewMessage,
+  isSystemCurfewActive,
+  isSystemCurfewError,
+  subscribeSystemAvailability,
+  syncSystemAvailabilityFromStatus,
+} from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { API_ENDPOINTS } from '../../constants/common.constant';
 import { StatusContext } from '../../context/Status';
@@ -37,6 +48,8 @@ import {
   IconPlay,
   IconFile,
   IconCopy,
+  IconAlertTriangle,
+  IconShield,
 } from '@douyinfe/semi-icons';
 import { Link } from 'react-router-dom';
 import NoticeModal from '../../components/layout/NoticeModal';
@@ -65,6 +78,78 @@ import {
 
 const { Text } = Typography;
 
+const CurfewHome = () => (
+  <div className='classic-home-default w-full overflow-x-hidden'>
+    <div className='classic-home-hero w-full border-b border-semi-color-border relative overflow-x-hidden'>
+      <div className='blur-ball blur-ball-indigo' />
+      <div className='blur-ball blur-ball-teal' />
+      <div className='flex min-h-[calc(100vh-64px)] items-center justify-center px-4 pt-24 pb-12'>
+        <div className='relative z-[1] mx-auto grid w-full max-w-5xl items-center gap-8 lg:grid-cols-[1.08fr_0.92fr]'>
+          <section className='space-y-6 text-center lg:text-left'>
+            <div className='inline-flex items-center gap-2 rounded-full border border-semi-color-border bg-white/80 px-4 py-2 text-sm font-medium text-semi-color-primary shadow-sm backdrop-blur dark:bg-white/10'>
+              <IconAlertTriangle />
+              系统可用时间
+            </div>
+            <div className='space-y-4'>
+              <h1 className='text-4xl md:text-5xl lg:text-6xl font-bold leading-tight text-semi-color-text-0'>
+                服务暂时进入
+                <br />
+                <span className='shine-text'>宵禁状态</span>
+              </h1>
+              <p className='mx-auto max-w-2xl text-lg leading-8 text-semi-color-text-1 lg:mx-0'>
+                {getSystemCurfewMessage()}
+              </p>
+            </div>
+            <div className='flex flex-wrap justify-center gap-3 text-sm text-semi-color-text-2 lg:justify-start'>
+              <span className='inline-flex items-center gap-2 rounded-full border border-semi-color-border bg-white/70 px-3 py-1.5 dark:bg-white/10'>
+                <IconShield />
+                API 调用已暂停
+              </span>
+              <span className='inline-flex items-center gap-2 rounded-full border border-semi-color-border bg-white/70 px-3 py-1.5 dark:bg-white/10'>
+                <IconFile />
+                前端页面仍可浏览
+              </span>
+            </div>
+          </section>
+
+          <section className='rounded-3xl border border-semi-color-border bg-white/80 p-5 shadow-[0_24px_80px_-42px_rgba(15,23,42,0.55)] backdrop-blur dark:bg-white/10'>
+            <div className='rounded-2xl border border-semi-color-border bg-white/70 p-5 font-mono text-sm text-semi-color-text-1 dark:bg-black/20'>
+              <div className='mb-5 flex items-center justify-between font-sans'>
+                <div>
+                  <p className='font-medium text-semi-color-text-0'>
+                    Gateway status
+                  </p>
+                  <p className='mt-1 text-xs text-semi-color-text-2'>
+                    Request guard is active
+                  </p>
+                </div>
+                <span className='rounded-full bg-orange-100 px-3 py-1 text-xs font-medium text-orange-700 dark:bg-orange-500/20 dark:text-orange-200'>
+                  503
+                </span>
+              </div>
+              <div className='space-y-3'>
+                <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
+                  <span className='text-emerald-600'>POST</span>
+                  <span> /v1/chat/completions</span>
+                </div>
+                <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
+                  {'{'}
+                  <div className='pl-4'>
+                    "code": "system_curfew",
+                    <br />
+                    "message": "当前处于宵禁状态"
+                  </div>
+                  {'}'}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
 const Home = () => {
   const { t, i18n } = useTranslation();
   const [statusState] = useContext(StatusContext);
@@ -80,34 +165,50 @@ const Home = () => {
   const endpointItems = API_ENDPOINTS.map((e) => ({ value: e }));
   const [endpointIndex, setEndpointIndex] = useState(0);
   const isChinese = i18n.language.startsWith('zh');
+  const [curfewActive, setCurfewActive] = useState(isSystemCurfewActive());
 
   const displayHomePageContent = async () => {
-    setHomePageContent(localStorage.getItem('home_page_content') || '');
-    const res = await API.get('/api/home_page_content');
-    const { success, message, data } = res.data;
-    if (success) {
-      let content = data;
-      if (!data.startsWith('https://')) {
-        content = marked.parse(data);
-      }
-      setHomePageContent(content);
-      localStorage.setItem('home_page_content', content);
-
-      // 如果内容是 URL，则发送主题模式
-      if (data.startsWith('https://')) {
-        const iframe = document.querySelector('iframe');
-        if (iframe) {
-          iframe.onload = () => {
-            iframe.contentWindow.postMessage({ themeMode: actualTheme }, '*');
-            iframe.contentWindow.postMessage({ lang: i18n.language }, '*');
-          };
-        }
-      }
-    } else {
-      showError(message);
-      setHomePageContent('加载首页内容失败...');
+    if (curfewActive) {
+      setHomePageContent('');
+      setHomePageContentLoaded(true);
+      return;
     }
-    setHomePageContentLoaded(true);
+    setHomePageContent(localStorage.getItem('home_page_content') || '');
+    try {
+      const res = await API.get('/api/home_page_content');
+      const { success, message, data } = res.data;
+      if (success) {
+        let content = data;
+        if (!data.startsWith('https://')) {
+          content = marked.parse(data);
+        }
+        setHomePageContent(content);
+        localStorage.setItem('home_page_content', content);
+
+        // 如果内容是 URL，则发送主题模式
+        if (data.startsWith('https://')) {
+          const iframe = document.querySelector('iframe');
+          if (iframe) {
+            iframe.onload = () => {
+              iframe.contentWindow.postMessage({ themeMode: actualTheme }, '*');
+              iframe.contentWindow.postMessage({ lang: i18n.language }, '*');
+            };
+          }
+        }
+      } else {
+        showError(message);
+        setHomePageContent('加载首页内容失败...');
+      }
+    } catch (error) {
+      if (isSystemCurfewError(error)) {
+        setHomePageContent('');
+      } else {
+        console.error('加载首页内容失败:', error);
+        setHomePageContent('加载首页内容失败...');
+      }
+    } finally {
+      setHomePageContentLoaded(true);
+    }
   };
 
   const handleCopyBaseURL = async () => {
@@ -118,7 +219,60 @@ const Home = () => {
   };
 
   useEffect(() => {
+    let timer;
+    let disposed = false;
+
+    function clearRefreshTimer() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    }
+
+    function scheduleRefresh() {
+      clearRefreshTimer();
+      if (disposed) return;
+      timer = setTimeout(
+        refreshAvailabilityStatus,
+        getSystemAvailabilityRefreshDelayMs(),
+      );
+    }
+
+    function syncCurfewState() {
+      setCurfewActive(isSystemCurfewActive());
+      scheduleRefresh();
+    }
+
+    async function refreshAvailabilityStatus() {
+      if (disposed) return;
+      try {
+        const res = await API.get('/api/status', { skipErrorHandler: true });
+        const { success, data } = res.data;
+        if (success) {
+          syncSystemAvailabilityFromStatus(data);
+        }
+      } catch (error) {
+        if (!isSystemCurfewError(error)) {
+          console.error('刷新系统可用时间失败:', error);
+        }
+      }
+      syncCurfewState();
+    }
+
+    syncCurfewState();
+    const unsubscribe = subscribeSystemAvailability(syncCurfewState);
+    return () => {
+      disposed = true;
+      clearRefreshTimer();
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     const checkNoticeAndShow = async () => {
+      if (curfewActive) {
+        return;
+      }
       const lastCloseDate = localStorage.getItem('notice_close_date');
       const today = new Date().toDateString();
       if (lastCloseDate !== today) {
@@ -135,11 +289,11 @@ const Home = () => {
     };
 
     checkNoticeAndShow();
-  }, []);
+  }, [curfewActive]);
 
   useEffect(() => {
     displayHomePageContent().then();
-  }, []);
+  }, [curfewActive]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -155,7 +309,9 @@ const Home = () => {
         onClose={() => setNoticeVisible(false)}
         isMobile={isMobile}
       />
-      {homePageContentLoaded && homePageContent === '' ? (
+      {curfewActive ? (
+        <CurfewHome />
+      ) : homePageContentLoaded && homePageContent === '' ? (
         <div className='classic-home-default w-full overflow-x-hidden'>
           {/* Banner 部分 */}
           <div className='classic-home-hero w-full border-b border-semi-color-border relative overflow-x-hidden'>

@@ -23,6 +23,10 @@ import {
   formatMessageForAPI,
   isValidMessage,
 } from './utils';
+import {
+  isSystemCurfewError,
+  markSystemCurfewFromError,
+} from './systemAvailability';
 import axios from 'axios';
 import { MESSAGE_ROLES } from '../constants/playground.constants';
 
@@ -36,7 +40,6 @@ export let API = axios.create({
   },
 });
 
-
 function redirectToOAuthUrl(url, options = {}) {
   const { openInNewTab = false } = options;
   const targetUrl = typeof url === 'string' ? url : url.toString();
@@ -48,7 +51,6 @@ function redirectToOAuthUrl(url, options = {}) {
 
   window.location.assign(targetUrl);
 }
-
 
 function patchAPIInstance(instance) {
   const originalGet = instance.get.bind(instance);
@@ -78,7 +80,26 @@ function patchAPIInstance(instance) {
   };
 }
 
+function installAPIResponseInterceptors(instance) {
+  instance.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (isSystemCurfewError(error)) {
+        markSystemCurfewFromError(error);
+        return Promise.reject(error);
+      }
+      // 如果请求配置中显式要求跳过全局错误处理，则不弹出默认错误提示
+      if (error.config && error.config.skipErrorHandler) {
+        return Promise.reject(error);
+      }
+      showError(error);
+      return Promise.reject(error);
+    },
+  );
+}
+
 patchAPIInstance(API);
+installAPIResponseInterceptors(API);
 
 export function updateAPI() {
   API = axios.create({
@@ -92,19 +113,8 @@ export function updateAPI() {
   });
 
   patchAPIInstance(API);
+  installAPIResponseInterceptors(API);
 }
-
-API.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    // 如果请求配置中显式要求跳过全局错误处理，则不弹出默认错误提示
-    if (error.config && error.config.skipErrorHandler) {
-      return Promise.reject(error);
-    }
-    showError(error);
-    return Promise.reject(error);
-  },
-);
 
 // playground
 

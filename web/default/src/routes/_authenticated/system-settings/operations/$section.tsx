@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
+
 import { OperationsSettings } from '@/features/system-settings/operations'
 import {
   OPERATIONS_DEFAULT_SECTION,
@@ -27,6 +28,13 @@ export const Route = createFileRoute(
   '/_authenticated/system-settings/operations/$section'
 )({
   beforeLoad: ({ params }) => {
+    if (params.section === 'availability') {
+      throw redirect({
+        to: '/system-settings/custom/$section',
+        params: { section: 'availability' },
+      })
+    }
+
     if (params.section === 'monitoring') {
       throw redirect({
         to: '/system-settings/models/$section',

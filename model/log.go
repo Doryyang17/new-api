@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -324,6 +325,26 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	if err != nil {
 		logger.LogError(c, "failed to record log: "+err.Error())
 	}
+}
+
+func RecordAvailabilityRejectLog(c *gin.Context, content string, other map[string]interface{}) {
+	if other == nil {
+		other = map[string]interface{}{}
+	}
+	other["reject_reason"] = "system_curfew"
+	RecordErrorLog(
+		c,
+		c.GetInt("id"),
+		0,
+		common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		c.GetString("token_name"),
+		content,
+		c.GetInt("token_id"),
+		0,
+		common.GetContextKeyBool(c, constant.ContextKeyIsStream),
+		common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+		other,
+	)
 }
 
 type RecordConsumeLogParams struct {
