@@ -17,10 +17,30 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { AvailabilitySection } from '../maintenance/availability-section'
+import { DailyUsageLimitSection } from '../maintenance/daily-usage-limit-section'
 import type { CustomSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 
 const CUSTOM_SECTIONS = [
+  {
+    id: 'daily-usage-limit',
+    titleKey: 'Daily Usage Limit',
+    build: (settings: CustomSettings) => (
+      <DailyUsageLimitSection
+        defaultValues={{
+          'daily_usage_setting.enabled':
+            settings['daily_usage_setting.enabled'] ?? false,
+          'daily_usage_setting.limit_tokens':
+            settings['daily_usage_setting.limit_tokens'] ?? 0,
+          'daily_usage_setting.timezone':
+            settings['daily_usage_setting.timezone'] ?? 'Asia/Shanghai',
+          'daily_usage_setting.message':
+            settings['daily_usage_setting.message'] ??
+            '当日系统使用量已超上限，请每天再来。',
+        }}
+      />
+    ),
+  },
   {
     id: 'availability',
     titleKey: 'System Availability',

@@ -347,6 +347,26 @@ func RecordAvailabilityRejectLog(c *gin.Context, content string, other map[strin
 	)
 }
 
+func RecordDailyUsageLimitRejectLog(c *gin.Context, content string, other map[string]interface{}) {
+	if other == nil {
+		other = map[string]interface{}{}
+	}
+	other["reject_reason"] = "system_daily_usage_limit"
+	RecordErrorLog(
+		c,
+		c.GetInt("id"),
+		0,
+		common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		c.GetString("token_name"),
+		content,
+		c.GetInt("token_id"),
+		0,
+		common.GetContextKeyBool(c, constant.ContextKeyIsStream),
+		common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+		other,
+	)
+}
+
 type RecordConsumeLogParams struct {
 	ChannelId        int                    `json:"channel_id"`
 	PromptTokens     int                    `json:"prompt_tokens"`
@@ -363,6 +383,10 @@ type RecordConsumeLogParams struct {
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
+	createdAt := common.GetTimestamp()
+	if err := RecordSystemDailyUsageTokens(createdAt, int64(params.PromptTokens+params.CompletionTokens)); err != nil {
+		logger.LogError(c, "failed to record system daily usage counter: "+err.Error())
+	}
 	if !common.LogConsumeEnabled {
 		return
 	}
@@ -370,7 +394,6 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
-	createdAt := common.GetTimestamp()
 	otherStr := common.MapToJsonStr(params.Other)
 	// 判断是否需要记录 IP
 	needRecordIp := false

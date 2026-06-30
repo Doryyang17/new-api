@@ -123,6 +123,24 @@ export type VendorShareSeries = {
   buckets: number
 }
 
+export type DailyUsageStatus = {
+  enabled: boolean
+  limit_tokens: number
+  used_tokens: number
+  remaining_tokens: number
+  exceeded: boolean
+  message: string
+  code: string
+  timezone: string
+  day_start: number
+  day_end: number
+  refreshed_at: number
+  next_refresh_at: number
+  refresh_interval_seconds: number
+  retry_after_seconds: number
+  evaluation_error?: string
+}
+
 export type RankingsSnapshot = {
   // Overall (all categories) ------------------------------------------------
   models: ModelRanking[]
@@ -135,4 +153,6 @@ export type RankingsSnapshot = {
   models_history: ModelHistorySeries
   /** 100%-stacked area history of token share by vendor over the period. */
   vendor_share_history: VendorShareSeries
+  /** Five-minute daily system token usage snapshot. */
+  daily_usage: DailyUsageStatus
 }

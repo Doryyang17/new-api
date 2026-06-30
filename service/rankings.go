@@ -21,12 +21,13 @@ const (
 )
 
 type RankingsResponse struct {
-	Models             []RankedModel      `json:"models"`
-	Vendors            []RankedVendor     `json:"vendors"`
-	TopMovers          []RankingMover     `json:"top_movers"`
-	TopDroppers        []RankingMover     `json:"top_droppers"`
-	ModelsHistory      ModelHistorySeries `json:"models_history"`
-	VendorShareHistory VendorShareSeries  `json:"vendor_share_history"`
+	Models             []RankedModel          `json:"models"`
+	Vendors            []RankedVendor         `json:"vendors"`
+	TopMovers          []RankingMover         `json:"top_movers"`
+	TopDroppers        []RankingMover         `json:"top_droppers"`
+	ModelsHistory      ModelHistorySeries     `json:"models_history"`
+	VendorShareHistory VendorShareSeries      `json:"vendor_share_history"`
+	DailyUsage         SystemDailyUsageStatus `json:"daily_usage"`
 }
 
 type RankedModel struct {
@@ -144,7 +145,7 @@ func GetRankingsSnapshot(period string) (*RankingsResponse, error) {
 	rankingCacheMu.Lock()
 	if item, ok := rankingCache[config.id]; ok && now.Before(item.expiresAt) {
 		rankingCacheMu.Unlock()
-		return item.data, nil
+		return rankingsResponseWithCurrentDailyUsage(item.data), nil
 	}
 	rankingCacheMu.Unlock()
 
@@ -161,6 +162,15 @@ func GetRankingsSnapshot(period string) (*RankingsResponse, error) {
 	rankingCacheMu.Unlock()
 
 	return data, nil
+}
+
+func rankingsResponseWithCurrentDailyUsage(data *RankingsResponse) *RankingsResponse {
+	if data == nil {
+		return nil
+	}
+	current := *data
+	current.DailyUsage = GetSystemDailyUsageStatus()
+	return &current
 }
 
 func rankingConfig(period string) (rankingPeriodConfig, error) {
@@ -216,6 +226,7 @@ func buildRankingsSnapshot(config rankingPeriodConfig, now time.Time) (*Rankings
 		TopDroppers:        droppers,
 		ModelsHistory:      modelHistory,
 		VendorShareHistory: vendorHistory,
+		DailyUsage:         GetSystemDailyUsageStatus(),
 	}, nil
 }
 

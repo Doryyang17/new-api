@@ -5,10 +5,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -339,10 +341,40 @@ func UpdateOption(c *gin.Context) {
 		})
 		return
 	}
+	if err := system_setting.ValidateDailyUsageLimitOption(option.Key, option.Value.(string)); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	if option.Key == "daily_usage_setting.enabled" {
+		enabled, _ := strconv.ParseBool(strings.TrimSpace(option.Value.(string)))
+		if enabled && system_setting.GetDailyUsageLimitSettings().LimitTokens <= 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "daily usage token limit must be greater than 0 when enabled",
+			})
+			return
+		}
+	}
+	if option.Key == "daily_usage_setting.limit_tokens" && system_setting.GetDailyUsageLimitSettings().Enabled {
+		limit, _ := strconv.ParseInt(option.Value.(string), 10, 64)
+		if limit <= 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "daily usage token limit must be greater than 0 when enabled",
+			})
+			return
+		}
+	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if strings.HasPrefix(option.Key, "daily_usage_setting.") || option.Key == "LogConsumeEnabled" {
+		service.RefreshSystemDailyUsageStatus(time.Now())
 	}
 	// 出于安全考虑只记录被修改的配置项名称，不记录配置值（可能含密钥等敏感信息）。
 	recordManageAudit(c, "option.update", map[string]interface{}{

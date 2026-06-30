@@ -16,9 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { CheckCircle2, Gauge, Loader2, TriangleAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { cn } from '@/lib/utils'
-import type { RankingPeriod } from '../types'
+
+import { formatTokens } from '../lib/format'
+import type { DailyUsageStatus, RankingPeriod } from '../types'
 
 const PERIODS: { id: RankingPeriod; labelKey: string }[] = [
   { id: 'today', labelKey: 'Today' },
@@ -30,6 +34,8 @@ const PERIODS: { id: RankingPeriod; labelKey: string }[] = [
 type RankingsHeroProps = {
   period: RankingPeriod
   onPeriodChange: (period: RankingPeriod) => void
+  dailyUsage?: DailyUsageStatus
+  dailyUsageLoading?: boolean
 }
 
 /**
@@ -86,6 +92,176 @@ export function RankingsHero(props: RankingsHeroProps) {
           )
         })}
       </div>
+
+      <DailyUsageStrip
+        dailyUsage={props.dailyUsage}
+        loading={props.dailyUsageLoading}
+      />
     </section>
   )
+}
+
+type DailyUsageStripProps = {
+  dailyUsage?: DailyUsageStatus
+  loading?: boolean
+}
+
+function DailyUsageStrip(props: DailyUsageStripProps) {
+  const { t } = useTranslation()
+  const status = props.dailyUsage
+
+  if (props.loading) {
+    return (
+      <div
+        aria-live='polite'
+        className='bg-card/80 border-border/70 flex min-h-20 items-center gap-3 rounded-lg border px-4 py-3 text-sm shadow-sm'
+      >
+        <Loader2 className='text-muted-foreground size-4 animate-spin' />
+        <span className='text-muted-foreground'>
+          {t('Daily limit status is loading')}
+        </span>
+      </div>
+    )
+  }
+
+  if (!status) {
+    return (
+      <div className='bg-card/80 border-border/70 text-muted-foreground rounded-lg border px-4 py-3 text-sm shadow-sm'>
+        {t('Usage snapshot unavailable')}
+      </div>
+    )
+  }
+
+  const progress =
+    status.enabled && status.limit_tokens > 0
+      ? Math.min(100, (status.used_tokens / status.limit_tokens) * 100)
+      : 0
+  let badgeLabel = t('Limit off')
+  if (status.exceeded) {
+    badgeLabel = t('Limit reached')
+  } else if (status.enabled) {
+    badgeLabel = t('Limit enabled')
+  }
+
+  let badgeClassName = 'border-border bg-muted/50 text-muted-foreground'
+  if (status.exceeded) {
+    badgeClassName = 'border-destructive/40 bg-destructive/10 text-destructive'
+  } else if (status.enabled) {
+    badgeClassName = 'border-primary/30 bg-primary/10 text-primary'
+  }
+  const Icon = status.exceeded ? TriangleAlert : CheckCircle2
+
+  return (
+    <div
+      aria-live='polite'
+      className='bg-card/80 border-border/70 rounded-lg border px-4 py-3 shadow-sm'
+    >
+      <div className='flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'>
+        <div className='min-w-0 space-y-2'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <span className='bg-muted text-muted-foreground inline-flex size-8 items-center justify-center rounded-md'>
+              <Gauge className='size-4' />
+            </span>
+            <h2 className='text-sm font-semibold'>
+              {t("Today's system usage")}
+            </h2>
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium',
+                badgeClassName
+              )}
+            >
+              <Icon className='size-3.5' />
+              {badgeLabel}
+            </span>
+          </div>
+          <p className='text-muted-foreground max-w-3xl text-xs leading-5'>
+            {status.enabled
+              ? t(
+                  'Updated every 5 minutes. Requests are blocked before channel dispatch when the limit is reached.'
+                )
+              : t(
+                  'Tracking refreshes every 5 minutes. No daily cap is enforced until the switch is enabled.'
+                )}
+          </p>
+        </div>
+
+        <div className='grid min-w-0 gap-3 sm:grid-cols-3 lg:min-w-[420px]'>
+          <DailyUsageMetric
+            label={t('Used today')}
+            value={`${formatTokens(status.used_tokens)} ${t('tokens')}`}
+          />
+          <DailyUsageMetric
+            label={t('Daily cap')}
+            value={
+              status.limit_tokens > 0
+                ? `${formatTokens(status.limit_tokens)} ${t('tokens')}`
+                : t('Not set')
+            }
+          />
+          <DailyUsageMetric
+            label={t('Remaining')}
+            value={
+              status.enabled
+                ? `${formatTokens(status.remaining_tokens)} ${t('tokens')}`
+                : t('Not enforced')
+            }
+          />
+        </div>
+      </div>
+
+      {status.enabled && status.limit_tokens > 0 ? (
+        <div className='mt-4 space-y-2'>
+          <div className='bg-muted h-2 overflow-hidden rounded-full'>
+            <div
+              className={cn(
+                'h-full rounded-full transition-[width]',
+                status.exceeded ? 'bg-destructive' : 'bg-primary'
+              )}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <div className='text-muted-foreground mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs'>
+        <span>
+          {t('Accounting timezone: {{timezone}}', {
+            timezone: status.timezone || '-',
+          })}
+        </span>
+        <span>
+          {t('Last refresh: {{time}}', {
+            time: formatUsageTime(status.refreshed_at),
+          })}
+        </span>
+        <span>
+          {t('Next refresh: {{time}}', {
+            time: formatUsageTime(status.next_refresh_at),
+          })}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function DailyUsageMetric(props: { label: string; value: string }) {
+  return (
+    <div className='min-w-0'>
+      <div className='text-muted-foreground truncate text-xs'>
+        {props.label}
+      </div>
+      <div className='truncate text-sm font-semibold'>{props.value}</div>
+    </div>
+  )
+}
+
+function formatUsageTime(timestamp: number) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '-'
+  return new Date(timestamp * 1000).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }

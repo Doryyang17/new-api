@@ -367,6 +367,10 @@ export type CustomSettings = {
   'availability_setting.unavailable_end': string
   'availability_setting.timezone': string
   'availability_setting.message': string
+  'daily_usage_setting.enabled': boolean
+  'daily_usage_setting.limit_tokens': number
+  'daily_usage_setting.timezone': string
+  'daily_usage_setting.message': string
 }
 
 export type SecuritySettings = {

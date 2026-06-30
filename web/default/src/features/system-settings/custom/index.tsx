@@ -31,6 +31,10 @@ const defaultCustomSettings: CustomSettings = {
   'availability_setting.timezone': 'Asia/Shanghai',
   'availability_setting.message':
     '当前处于宵禁状态，22:00-8:00期间服务不可用，敬请谅解~',
+  'daily_usage_setting.enabled': false,
+  'daily_usage_setting.limit_tokens': 0,
+  'daily_usage_setting.timezone': 'Asia/Shanghai',
+  'daily_usage_setting.message': '当日系统使用量已超上限，请每天再来。',
 }
 
 export function CustomSettings() {
