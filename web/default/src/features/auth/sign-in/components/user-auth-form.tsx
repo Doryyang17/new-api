@@ -16,21 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react'
-import type { z } from 'zod'
-import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Link } from '@tanstack/react-router'
 import { Loader2, LogIn, KeyRound } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import {
-  buildAssertionResult,
-  prepareCredentialRequestOptions,
-  isPasskeySupported as detectPasskeySupport,
-} from '@/lib/passkey'
-import { cn } from '@/lib/utils'
-import { useStatus } from '@/hooks/use-status'
+import type { z } from 'zod'
+
+import { Dialog } from '@/components/dialog'
+import { PasswordInput } from '@/components/password-input'
+import { Turnstile } from '@/components/turnstile'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -42,17 +39,39 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Dialog } from '@/components/dialog'
-import { PasswordInput } from '@/components/password-input'
-import { Turnstile } from '@/components/turnstile'
 import { login, wechatLoginByCode } from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
-import { loginFormSchema } from '@/features/auth/constants'
+import {
+  REGISTRATION_CODE_LENGTH,
+  REGISTRATION_CODE_REGEX,
+  loginFormSchema,
+} from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import { beginPasskeyLogin, finishPasskeyLogin } from '@/features/auth/passkey'
 import type { AuthFormProps } from '@/features/auth/types'
+import { useStatus } from '@/hooks/use-status'
+import {
+  buildAssertionResult,
+  prepareCredentialRequestOptions,
+  isPasskeySupported as detectPasskeySupport,
+} from '@/lib/passkey'
+import { cn } from '@/lib/utils'
+
+const REGISTRATION_CODE_REQUIRED_MESSAGE = '请填写注册码完成账号创建'
+
+function isRegistrationCodeRequiredResponse(response: {
+  message?: string
+  data?: unknown
+}) {
+  if (response.message === REGISTRATION_CODE_REQUIRED_MESSAGE) return true
+  if (!response.data || typeof response.data !== 'object') return false
+  return (
+    (response.data as Record<string, unknown>).action ===
+    'registration_code_required'
+  )
+}
 
 export function UserAuthForm({
   className,
@@ -67,6 +86,11 @@ export function UserAuthForm({
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false)
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
   const [isWeChatSubmitting, setIsWeChatSubmitting] = useState(false)
+  const [wechatRegistrationCode, setWeChatRegistrationCode] = useState('')
+  const [wechatRegistrationCodeError, setWeChatRegistrationCodeError] =
+    useState('')
+  const [wechatRegistrationCodeRequired, setWeChatRegistrationCodeRequired] =
+    useState(false)
   const legalConsentErrorMessage = t('Please agree to the legal terms first')
   const loginFailedMessage = t('Login failed')
 
@@ -82,7 +106,10 @@ export function UserAuthForm({
     isTurnstileEnabled,
     turnstileSiteKey,
     turnstileToken,
-    setTurnstileToken,
+    turnstileResetKey,
+    handleTurnstileVerify,
+    handleTurnstileError,
+    resetTurnstile,
     validateTurnstile,
   } = useTurnstile()
   const { handleLoginSuccess, redirectTo2FA } = useAuthRedirect()
@@ -95,6 +122,10 @@ export function UserAuthForm({
     !passkeySupported ||
     (requiresLegalConsent && !agreedToLegal)
   const hasWeChatLogin = Boolean(status?.wechat_login)
+  const registrationCodeRegisterEnabled = Boolean(
+    status?.registration_code_register_enabled ??
+    status?.data?.registration_code_register_enabled
+  )
   const hasOAuthLogin = Boolean(
     status?.github_oauth ||
     status?.discord_oauth ||
@@ -105,6 +136,10 @@ export function UserAuthForm({
   )
   const hasAlternativeLogin =
     passkeyLoginEnabled || hasWeChatLogin || hasOAuthLogin
+  const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
+  const normalizedWeChatRegistrationCode = wechatRegistrationCode
+    .trim()
+    .toUpperCase()
 
   useEffect(() => {
     if (requiresLegalConsent) {
@@ -166,8 +201,11 @@ export function UserAuthForm({
 
         await handleLoginSuccess(res.data as { id?: number } | null, redirectTo)
         toast.success(t('Welcome back!'))
+      } else {
+        resetTurnstile()
       }
-    } catch (_error) {
+    } catch {
+      resetTurnstile()
       // Errors are handled by global interceptor
     } finally {
       setIsLoading(false)
@@ -187,6 +225,9 @@ export function UserAuthForm({
     setIsWeChatDialogOpen(open)
     if (!open) {
       setWeChatCode('')
+      setWeChatRegistrationCode('')
+      setWeChatRegistrationCodeError('')
+      setWeChatRegistrationCodeRequired(false)
       setIsWeChatSubmitting(false)
     }
   }
@@ -196,18 +237,47 @@ export function UserAuthForm({
       toast.error(t('Please enter the verification code'))
       return
     }
+    if (
+      registrationCodeRegisterEnabled &&
+      normalizedWeChatRegistrationCode &&
+      !REGISTRATION_CODE_REGEX.test(normalizedWeChatRegistrationCode)
+    ) {
+      const message = t('Enter a 20-character registration code')
+      setWeChatRegistrationCodeError(message)
+      toast.error(message)
+      return
+    }
+    if (
+      wechatRegistrationCodeRequired &&
+      !REGISTRATION_CODE_REGEX.test(normalizedWeChatRegistrationCode)
+    ) {
+      const message = t('Enter a 20-character registration code')
+      setWeChatRegistrationCodeError(message)
+      toast.error(message)
+      return
+    }
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode)
+      const res = await wechatLoginByCode(
+        wechatCode,
+        normalizedWeChatRegistrationCode || undefined
+      )
       if (res?.success) {
         await handleLoginSuccess(res.data as { id?: number } | null, redirectTo)
         toast.success(t('Signed in via WeChat'))
         handleWeChatDialogChange(false)
+      } else if (isRegistrationCodeRequiredResponse(res)) {
+        const message = t(
+          'This WeChat account is not registered yet. Enter your registration code to continue.'
+        )
+        setWeChatRegistrationCodeRequired(true)
+        setWeChatRegistrationCodeError(message)
+        toast.info(message)
       } else {
         toast.error(res?.message || loginFailedMessage)
       }
-    } catch (_error) {
+    } catch {
       toast.error(loginFailedMessage)
     } finally {
       setIsWeChatSubmitting(false)
@@ -375,7 +445,11 @@ export function UserAuthForm({
             <Button
               type='submit'
               className='mt-2 w-full justify-center gap-2'
-              disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
+              disabled={
+                isLoading ||
+                (requiresLegalConsent && !agreedToLegal) ||
+                !turnstileReady
+              }
             >
               {isLoading ? <Loader2 className='animate-spin' /> : <LogIn />}
               {t('Sign in')}
@@ -386,7 +460,10 @@ export function UserAuthForm({
               <div className='mt-2'>
                 <Turnstile
                   siteKey={turnstileSiteKey}
-                  onVerify={setTurnstileToken}
+                  onVerify={handleTurnstileVerify}
+                  onExpire={resetTurnstile}
+                  onError={handleTurnstileError}
+                  resetKey={turnstileResetKey}
                 />
               </div>
             )}
@@ -408,9 +485,15 @@ export function UserAuthForm({
           open={isWeChatDialogOpen}
           onOpenChange={handleWeChatDialogChange}
           title={t('WeChat sign in')}
-          description={t(
-            'Scan the QR code to follow the official account and reply with “验证码” to receive your verification code.'
-          )}
+          description={
+            wechatRegistrationCodeRequired
+              ? t(
+                  'This WeChat account is not registered yet. Enter your registration code to continue.'
+                )
+              : t(
+                  'Scan the QR code to follow the official account and reply with “验证码” to receive your verification code.'
+                )
+          }
           contentClassName='max-w-sm'
           headerClassName='text-left'
           contentHeight='auto'
@@ -431,6 +514,10 @@ export function UserAuthForm({
                 disabled={
                   isWeChatSubmitting ||
                   !wechatCode.trim() ||
+                  (wechatRegistrationCodeRequired &&
+                    !REGISTRATION_CODE_REGEX.test(
+                      normalizedWeChatRegistrationCode
+                    )) ||
                   (requiresLegalConsent && !agreedToLegal)
                 }
                 className='gap-2'
@@ -466,6 +553,40 @@ export function UserAuthForm({
               autoComplete='one-time-code'
             />
           </div>
+          {registrationCodeRegisterEnabled ? (
+            <div className='grid gap-2'>
+              <Label htmlFor='wechat-registration-code'>
+                {t('Registration code')}
+              </Label>
+              <Input
+                id='wechat-registration-code'
+                autoComplete='one-time-code'
+                inputMode='text'
+                maxLength={REGISTRATION_CODE_LENGTH}
+                placeholder={t('Please enter your registration code')}
+                value={wechatRegistrationCode}
+                onChange={(event) => {
+                  const value = event.target.value
+                    .toUpperCase()
+                    .replaceAll(/[^A-Z0-9]/g, '')
+                    .slice(0, REGISTRATION_CODE_LENGTH)
+                  setWeChatRegistrationCode(value)
+                  setWeChatRegistrationCodeError('')
+                }}
+              />
+              {wechatRegistrationCodeError ? (
+                <p className='text-destructive text-xs' role='alert'>
+                  {wechatRegistrationCodeError}
+                </p>
+              ) : (
+                <p className='text-muted-foreground text-xs'>
+                  {t(
+                    'First-time WeChat sign-in requires a registration code. Existing linked accounts can leave it blank.'
+                  )}
+                </p>
+              )}
+            </div>
+          ) : null}
         </Dialog>
       )}
     </Form>

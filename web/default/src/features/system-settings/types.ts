@@ -362,6 +362,7 @@ export type OperationsSettings = {
 }
 
 export type CustomSettings = {
+  RegistrationCodeRegisterEnabled: boolean
   'availability_setting.enabled': boolean
   'availability_setting.unavailable_start': string
   'availability_setting.unavailable_end': string
@@ -371,6 +372,36 @@ export type CustomSettings = {
   'daily_usage_setting.limit_tokens': number
   'daily_usage_setting.timezone': string
   'daily_usage_setting.message': string
+}
+
+export type RegistrationCode = {
+  id: number
+  code: string
+  status: number
+  created_by: number
+  created_at: number
+  used_user_id: number
+  used_at: number
+  batch_id: string
+  note?: string
+  used_username?: string
+}
+
+export type RegistrationCodeListResponse = {
+  success: boolean
+  message: string
+  data?: {
+    page: number
+    page_size: number
+    total: number
+    items: RegistrationCode[]
+  }
+}
+
+export type CreateRegistrationCodesResponse = {
+  success: boolean
+  message: string
+  data?: string[]
 }
 
 export type SecuritySettings = {

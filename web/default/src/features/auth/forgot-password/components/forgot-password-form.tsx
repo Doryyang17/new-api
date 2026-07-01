@@ -54,7 +54,10 @@ export function ForgotPasswordForm({
     isTurnstileEnabled,
     turnstileSiteKey,
     turnstileToken,
-    setTurnstileToken,
+    turnstileResetKey,
+    handleTurnstileVerify,
+    handleTurnstileError,
+    resetTurnstile,
     validateTurnstile,
   } = useTurnstile()
   const {
@@ -82,7 +85,7 @@ export function ForgotPasswordForm({
       } else {
         toast.error(res?.message || t('Failed to send reset email'))
       }
-    } catch (_error) {
+    } catch {
       // Errors are handled by global interceptor
     } finally {
       setIsLoading(false)
@@ -125,7 +128,10 @@ export function ForgotPasswordForm({
           <div className='mt-2'>
             <Turnstile
               siteKey={turnstileSiteKey}
-              onVerify={setTurnstileToken}
+              onVerify={handleTurnstileVerify}
+              onExpire={resetTurnstile}
+              onError={handleTurnstileError}
+              resetKey={turnstileResetKey}
             />
           </div>
         )}

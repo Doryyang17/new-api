@@ -17,10 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+
 import type {
   ConfirmPaymentComplianceResponse,
+  CreateRegistrationCodesResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
+  RegistrationCodeListResponse,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
@@ -37,6 +40,31 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function getRegistrationCodes(
+  status: 'unused' | 'used',
+  page: number,
+  pageSize: number
+) {
+  const res = await api.get<RegistrationCodeListResponse>(
+    '/api/registration-code/',
+    {
+      params: { status, p: page, page_size: pageSize },
+    }
+  )
+  return res.data
+}
+
+export async function createRegistrationCodes(request: {
+  count: number
+  note?: string
+}) {
+  const res = await api.post<CreateRegistrationCodesResponse>(
+    '/api/registration-code/batch',
+    request
+  )
   return res.data
 }
 

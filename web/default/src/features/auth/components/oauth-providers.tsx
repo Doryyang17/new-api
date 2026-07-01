@@ -18,14 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import {
   IconDiscord,
   IconGithub,
   IconLinuxDo,
   IconWeChat,
 } from '@/assets/brand-icons'
-import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+
 import { useOAuthLogin } from '../hooks/use-oauth-login'
 import type { SystemStatus } from '../types'
 
@@ -65,13 +67,17 @@ export function OAuthProviders({
     handleCustomOAuthLogin,
   } = useOAuthLogin(status)
 
+  const startOAuth = (handler: () => void) => {
+    handler()
+  }
+
   const providerButtons: ProviderButton[] = []
 
   if (status?.wechat_login && onWeChatLogin) {
     providerButtons.push({
       key: 'wechat',
       label: t('Continue with WeChat'),
-      onClick: onWeChatLogin,
+      onClick: () => startOAuth(onWeChatLogin),
       icon: <IconWeChat className='h-4 w-4' />,
       disabled: isWeChatLoading,
     })
@@ -81,7 +87,7 @@ export function OAuthProviders({
     providerButtons.push({
       key: 'github',
       label: githubButtonText || t('Continue with GitHub'),
-      onClick: handleGitHubLogin,
+      onClick: () => startOAuth(handleGitHubLogin),
       icon: <IconGithub className='h-4 w-4' />,
       disabled: githubButtonDisabled,
     })
@@ -91,7 +97,7 @@ export function OAuthProviders({
     providerButtons.push({
       key: 'discord',
       label: t('Continue with Discord'),
-      onClick: handleDiscordLogin,
+      onClick: () => startOAuth(handleDiscordLogin),
       icon: <IconDiscord className='h-4 w-4' />,
     })
   }
@@ -100,7 +106,7 @@ export function OAuthProviders({
     providerButtons.push({
       key: 'oidc',
       label: t('Continue with OIDC'),
-      onClick: handleOIDCLogin,
+      onClick: () => startOAuth(handleOIDCLogin),
     })
   }
 
@@ -108,7 +114,7 @@ export function OAuthProviders({
     providerButtons.push({
       key: 'linuxdo',
       label: t('Continue with LinuxDO'),
-      onClick: handleLinuxDOLogin,
+      onClick: () => startOAuth(handleLinuxDOLogin),
       icon: <IconLinuxDo className='h-4 w-4' />,
     })
   }
@@ -117,7 +123,7 @@ export function OAuthProviders({
     providerButtons.push({
       key: 'telegram',
       label: t('Continue with Telegram'),
-      onClick: handleTelegramLogin,
+      onClick: () => startOAuth(handleTelegramLogin),
     })
   }
 
@@ -128,7 +134,7 @@ export function OAuthProviders({
       providerButtons.push({
         key: `custom-${provider.slug}`,
         label: t('Continue with {{name}}', { name: provider.name }),
-        onClick: () => handleCustomOAuthLogin(provider),
+        onClick: () => startOAuth(() => handleCustomOAuthLogin(provider)),
       })
     }
   }

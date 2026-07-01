@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
 
@@ -15,13 +14,24 @@ type turnstileCheckResponse struct {
 }
 
 func TurnstileCheck() gin.HandlerFunc {
+	return turnstileCheck(false)
+}
+
+func TurnstileCheckStrict() gin.HandlerFunc {
+	return turnstileCheck(true)
+}
+
+func turnstileCheck(strict bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if common.TurnstileCheckEnabled {
-			session := sessions.Default(c)
-			turnstileChecked := session.Get("turnstile")
-			if turnstileChecked != nil {
-				c.Next()
-				return
+			var session sessions.Session
+			if !strict {
+				session = sessions.Default(c)
+				turnstileChecked := session.Get("turnstile")
+				if turnstileChecked != nil {
+					c.Next()
+					return
+				}
 			}
 			response := c.Query("turnstile")
 			if response == "" {
@@ -48,7 +58,7 @@ func TurnstileCheck() gin.HandlerFunc {
 			}
 			defer rawRes.Body.Close()
 			var res turnstileCheckResponse
-			err = json.NewDecoder(rawRes.Body).Decode(&res)
+			err = common.DecodeJson(rawRes.Body, &res)
 			if err != nil {
 				common.SysLog(err.Error())
 				c.JSON(http.StatusOK, gin.H{
@@ -66,14 +76,16 @@ func TurnstileCheck() gin.HandlerFunc {
 				c.Abort()
 				return
 			}
-			session.Set("turnstile", true)
-			err = session.Save()
-			if err != nil {
-				c.JSON(http.StatusOK, gin.H{
-					"message": "无法保存会话信息，请重试",
-					"success": false,
-				})
-				return
+			if !strict {
+				session.Set("turnstile", true)
+				err = session.Save()
+				if err != nil {
+					c.JSON(http.StatusOK, gin.H{
+						"message": "无法保存会话信息，请重试",
+						"success": false,
+					})
+					return
+				}
 			}
 		}
 		c.Next()

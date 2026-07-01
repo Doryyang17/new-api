@@ -32,6 +32,15 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type RegisterRequest struct {
+	Username         string `json:"username" validate:"max=20"`
+	Password         string `json:"password" validate:"min=8,max=20"`
+	Email            string `json:"email" validate:"max=50"`
+	VerificationCode string `json:"verification_code"`
+	AffCode          string `json:"aff_code"`
+	RegistrationCode string `json:"registration_code"`
+}
+
 func Login(c *gin.Context) {
 	if !common.PasswordLoginEnabled {
 		common.ApiErrorI18n(c, i18n.MsgUserPasswordLoginDisabled)
@@ -110,6 +119,11 @@ func loginMethodFromContext(c *gin.Context) string {
 			return "oauth:" + provider
 		}
 		return "oauth"
+	case "/api/oauth/:provider/complete-registration":
+		if provider := c.Param("provider"); provider != "" {
+			return "oauth_registration:" + provider
+		}
+		return "oauth_registration"
 	default:
 		return "unknown"
 	}
@@ -184,27 +198,51 @@ func Register(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserPasswordRegisterDisabled)
 		return
 	}
-	var user model.User
-	err := json.NewDecoder(c.Request.Body).Decode(&user)
+	var request RegisterRequest
+	err := common.DecodeJson(c.Request.Body, &request)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	if err := common.Validate.Struct(&user); err != nil {
+	request.Username = strings.TrimSpace(request.Username)
+	request.Email = strings.TrimSpace(request.Email)
+	request.VerificationCode = strings.TrimSpace(request.VerificationCode)
+	request.AffCode = strings.TrimSpace(request.AffCode)
+	request.RegistrationCode = model.NormalizeRegistrationCode(request.RegistrationCode)
+	if err := common.Validate.Struct(&request); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
 		return
 	}
+	riskKeys := service.BuildRegistrationRiskKeys(c.ClientIP(), c.Request.Header)
+	if common.RegistrationCodeRegisterEnabled {
+		if !model.IsRegistrationCodeFormatValid(request.RegistrationCode) {
+			service.RecordRegistrationCodeFailure(riskKeys)
+			common.ApiErrorMsg(c, "注册码无效或已被使用")
+			return
+		}
+		available, err := model.IsRegistrationCodeAvailable(request.RegistrationCode)
+		if err != nil {
+			common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+			common.SysLog(fmt.Sprintf("Check registration code error: %v", err))
+			return
+		}
+		if !available {
+			service.RecordRegistrationCodeFailure(riskKeys)
+			common.ApiErrorMsg(c, "注册码无效或已被使用")
+			return
+		}
+	}
 	if common.EmailVerificationEnabled {
-		if user.Email == "" || user.VerificationCode == "" {
+		if request.Email == "" || request.VerificationCode == "" {
 			common.ApiErrorI18n(c, i18n.MsgUserEmailVerificationRequired)
 			return
 		}
-		if !common.VerifyCodeWithKey(user.Email, user.VerificationCode, common.EmailVerificationPurpose) {
+		if !common.VerifyCodeWithKey(request.Email, request.VerificationCode, common.EmailVerificationPurpose) {
 			common.ApiErrorI18n(c, i18n.MsgUserVerificationCodeError)
 			return
 		}
 	}
-	exist, err := model.CheckUserExistOrDeleted(user.Username, user.Email)
+	exist, err := model.CheckUserExistOrDeleted(request.Username, request.Email)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
 		common.SysLog(fmt.Sprintf("CheckUserExistOrDeleted error: %v", err))
@@ -214,57 +252,68 @@ func Register(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserExists)
 		return
 	}
-	affCode := user.AffCode // this code is the inviter's code, not the user's own code
+	affCode := request.AffCode // this code is the inviter's code, not the user's own code
 	inviterId, _ := model.GetUserIdByAffCode(affCode)
 	cleanUser := model.User{
-		Username:    user.Username,
-		Password:    user.Password,
-		DisplayName: user.Username,
+		Username:    request.Username,
+		Password:    request.Password,
+		DisplayName: request.Username,
 		InviterId:   inviterId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
 	}
 	if common.EmailVerificationEnabled {
-		cleanUser.Email = user.Email
+		cleanUser.Email = request.Email
 	}
-	if err := cleanUser.Insert(inviterId); err != nil {
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := cleanUser.InsertWithTx(tx, inviterId); err != nil {
+			return err
+		}
+		if common.RegistrationCodeRegisterEnabled {
+			if err := model.UseRegistrationCodeWithTx(tx, request.RegistrationCode, cleanUser.Id); err != nil {
+				return err
+			}
+		}
+		// 生成默认令牌
+		if constant.GenerateDefaultToken {
+			key, err := common.GenerateKey()
+			if err != nil {
+				common.SysLog("failed to generate token key: " + err.Error())
+				return err
+			}
+			// 生成默认令牌
+			token := model.Token{
+				UserId:             cleanUser.Id,
+				Name:               cleanUser.Username + "的初始令牌",
+				Key:                key,
+				CreatedTime:        common.GetTimestamp(),
+				AccessedTime:       common.GetTimestamp(),
+				ExpiredTime:        -1,     // 永不过期
+				RemainQuota:        500000, // 示例额度
+				UnlimitedQuota:     true,
+				ModelLimitsEnabled: false,
+			}
+			if setting.DefaultUseAutoGroup {
+				token.Group = "auto"
+			}
+			if err := tx.Create(&token).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, model.ErrRegistrationCodeInvalid) {
+			service.RecordRegistrationCodeFailure(riskKeys)
+			common.ApiErrorMsg(c, "注册码无效或已被使用")
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}
-
-	// 获取插入后的用户ID
-	var insertedUser model.User
-	if err := model.DB.Where("username = ?", cleanUser.Username).First(&insertedUser).Error; err != nil {
-		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
-		return
+	if common.RegistrationCodeRegisterEnabled {
+		service.ResetRegistrationCodeFailures(riskKeys)
 	}
-	// 生成默认令牌
-	if constant.GenerateDefaultToken {
-		key, err := common.GenerateKey()
-		if err != nil {
-			common.ApiErrorI18n(c, i18n.MsgUserDefaultTokenFailed)
-			common.SysLog("failed to generate token key: " + err.Error())
-			return
-		}
-		// 生成默认令牌
-		token := model.Token{
-			UserId:             insertedUser.Id, // 使用插入后的用户ID
-			Name:               cleanUser.Username + "的初始令牌",
-			Key:                key,
-			CreatedTime:        common.GetTimestamp(),
-			AccessedTime:       common.GetTimestamp(),
-			ExpiredTime:        -1,     // 永不过期
-			RemainQuota:        500000, // 示例额度
-			UnlimitedQuota:     true,
-			ModelLimitsEnabled: false,
-		}
-		if setting.DefaultUseAutoGroup {
-			token.Group = "auto"
-		}
-		if err := token.Insert(); err != nil {
-			common.ApiErrorI18n(c, i18n.MsgCreateDefaultTokenErr)
-			return
-		}
-	}
+	cleanUser.FinalizeOAuthUserCreation(inviterId)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

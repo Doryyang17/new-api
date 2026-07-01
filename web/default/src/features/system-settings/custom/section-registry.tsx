@@ -16,12 +16,26 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+/* eslint-disable react-refresh/only-export-components */
 import { AvailabilitySection } from '../maintenance/availability-section'
 import { DailyUsageLimitSection } from '../maintenance/daily-usage-limit-section'
 import type { CustomSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { RegistrationCodesSection } from './registration-codes-section'
 
 const CUSTOM_SECTIONS = [
+  {
+    id: 'registration-codes',
+    titleKey: 'Registration Codes',
+    build: (settings: CustomSettings) => (
+      <RegistrationCodesSection
+        defaultValues={{
+          RegistrationCodeRegisterEnabled:
+            settings.RegistrationCodeRegisterEnabled ?? false,
+        }}
+      />
+    ),
+  },
   {
     id: 'daily-usage-limit',
     titleKey: 'Daily Usage Limit',

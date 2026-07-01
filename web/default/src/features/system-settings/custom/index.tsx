@@ -25,6 +25,7 @@ import {
 } from './section-registry.tsx'
 
 const defaultCustomSettings: CustomSettings = {
+  RegistrationCodeRegisterEnabled: false,
   'availability_setting.enabled': false,
   'availability_setting.unavailable_start': '22:00',
   'availability_setting.unavailable_end': '08:00',

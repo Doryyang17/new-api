@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,9 +10,11 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type wechatLoginResponse struct {
@@ -40,7 +41,7 @@ func getWeChatIdByCode(code string) (string, error) {
 	}
 	defer httpResponse.Body.Close()
 	var res wechatLoginResponse
-	err = json.NewDecoder(httpResponse.Body).Decode(&res)
+	err = common.DecodeJson(httpResponse.Body, &res)
 	if err != nil {
 		return "", err
 	}
@@ -91,18 +92,58 @@ func WeChatAuth(c *gin.Context) {
 		}
 	} else {
 		if common.RegisterEnabled {
+			registrationCode := ""
+			registrationRiskKeys := service.BuildRegistrationRiskKeys(c.ClientIP(), c.Request.Header)
+			if common.RegistrationCodeRegisterEnabled {
+				rawRegistrationCode, hasRegistrationCode := c.GetQuery("registration_code")
+				if !hasRegistrationCode {
+					c.JSON(http.StatusOK, gin.H{
+						"success": false,
+						"message": oauthRegistrationCodeRequiredMessage,
+						"data": gin.H{
+							"action": oauthRegistrationCodeRequiredAction,
+						},
+					})
+					return
+				}
+				var ok bool
+				registrationCode, registrationRiskKeys, ok = validateRegistrationCodeForNewUser(c, rawRegistrationCode)
+				if !ok {
+					return
+				}
+			}
 			user.Username = "wechat_" + strconv.Itoa(model.GetMaxUserId()+1)
 			user.DisplayName = "WeChat User"
 			user.Role = common.RoleCommonUser
 			user.Status = common.UserStatusEnabled
 
-			if err := user.Insert(0); err != nil {
+			err = model.DB.Transaction(func(tx *gorm.DB) error {
+				if err := user.InsertWithTx(tx, 0); err != nil {
+					return err
+				}
+				if common.RegistrationCodeRegisterEnabled {
+					if err := model.UseRegistrationCodeWithTx(tx, registrationCode, user.Id); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				if errors.Is(err, model.ErrRegistrationCodeInvalid) {
+					service.RecordRegistrationCodeFailure(registrationRiskKeys)
+					common.ApiErrorMsg(c, registrationCodeInvalidMessage)
+					return
+				}
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
 					"message": err.Error(),
 				})
 				return
 			}
+			if common.RegistrationCodeRegisterEnabled {
+				service.ResetRegistrationCodeFailures(registrationRiskKeys)
+			}
+			user.FinalizeOAuthUserCreation(0)
 		} else {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,

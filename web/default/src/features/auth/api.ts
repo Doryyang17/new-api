@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+
+import { getRegistrationFingerprint } from './lib/registration-fingerprint'
 import type {
   LoginPayload,
   LoginResponse,
@@ -25,6 +27,12 @@ import type {
   RegisterPayload,
   ApiResponse,
 } from './types'
+
+type CompleteOAuthRegistrationPayload = {
+  ticket: string
+  registrationCode: string
+  turnstile?: string
+}
 
 // ============================================================================
 // Authentication APIs
@@ -88,14 +96,55 @@ export async function githubOAuthStart(clientId: string, state: string) {
 export async function getOAuthState(): Promise<string> {
   const aff =
     typeof window !== 'undefined' ? (localStorage.getItem('aff') ?? '') : ''
-  const res = await api.get('/api/oauth/state', { params: { aff } })
+  const res = await api.get('/api/oauth/state', {
+    params: {
+      aff,
+    },
+    skipBusinessError: true,
+  })
   if (res.data?.success) return res.data.data
+  if (res.data?.message) throw new Error(res.data.message)
   return ''
 }
 
+export async function completeOAuthRegistration(
+  provider: string,
+  payload: CompleteOAuthRegistrationPayload
+): Promise<ApiResponse> {
+  const res = await api.post(
+    `/api/oauth/${provider}/complete-registration`,
+    {
+      ticket: payload.ticket,
+      registration_code: payload.registrationCode.trim().toUpperCase(),
+    },
+    {
+      params: { turnstile: payload.turnstile ?? '' },
+      headers: {
+        'X-Registration-Fingerprint': getRegistrationFingerprint(),
+      },
+      skipBusinessError: true,
+    }
+  )
+  return res.data
+}
+
 // WeChat login by authorization code
-export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
-  const res = await api.get('/api/oauth/wechat', { params: { code } })
+export async function wechatLoginByCode(
+  code: string,
+  registrationCode?: string
+): Promise<ApiResponse> {
+  const normalizedRegistrationCode =
+    registrationCode?.trim().toUpperCase() ?? ''
+  const headers = normalizedRegistrationCode
+    ? { 'X-Registration-Fingerprint': getRegistrationFingerprint() }
+    : undefined
+  const res = await api.get('/api/oauth/wechat', {
+    params: {
+      code,
+      registration_code: normalizedRegistrationCode || undefined,
+    },
+    headers,
+  })
   return res.data
 }
 
@@ -107,6 +156,9 @@ export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
 export async function register(payload: RegisterPayload): Promise<ApiResponse> {
   const res = await api.post(`/api/user/register`, payload, {
     params: { turnstile: payload.turnstile ?? '' },
+    headers: {
+      'X-Registration-Fingerprint': getRegistrationFingerprint(),
+    },
   })
   return res.data
 }

@@ -30,6 +30,7 @@ export const loginFormSchema = z.object({
 export const registerFormSchema = z
   .object({
     username: z.string().min(1, 'Please enter your username'),
+    registrationCode: z.string().optional(),
     email: z.string().optional(),
     password: z
       .string()
@@ -61,7 +62,9 @@ export const PASSWORD_MIN_LENGTH = 8
 export const PASSWORD_MAX_LENGTH = 20
 export const OTP_LENGTH = 6
 export const BACKUP_CODE_LENGTH = 9 // XXXX-XXXX format
+export const REGISTRATION_CODE_LENGTH = 20
 export const BACKUP_CODE_REGEX = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/i
+export const REGISTRATION_CODE_REGEX = /^[A-Z0-9]{20}$/
 export const OTP_REGEX = /^\d{6}$/
 
 // ============================================================================

@@ -16,19 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react'
-import type { z } from 'zod'
-import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Loader2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
-import { useStatus } from '@/hooks/use-status'
+import type { z } from 'zod'
+
+import { Dialog } from '@/components/dialog'
+import { PasswordInput } from '@/components/password-input'
+import { Turnstile } from '@/components/turnstile'
 import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -36,13 +39,14 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Dialog } from '@/components/dialog'
-import { PasswordInput } from '@/components/password-input'
-import { Turnstile } from '@/components/turnstile'
 import { register, wechatLoginByCode } from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
-import { registerFormSchema } from '@/features/auth/constants'
+import {
+  REGISTRATION_CODE_LENGTH,
+  REGISTRATION_CODE_REGEX,
+  registerFormSchema,
+} from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useEmailVerification } from '@/features/auth/hooks/use-email-verification'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
@@ -50,6 +54,8 @@ import {
   getAffiliateCode,
   saveAffiliateCode,
 } from '@/features/auth/lib/storage'
+import { useStatus } from '@/hooks/use-status'
+import { cn } from '@/lib/utils'
 
 export function SignUpForm({
   className,
@@ -69,7 +75,10 @@ export function SignUpForm({
     isTurnstileEnabled,
     turnstileSiteKey,
     turnstileToken,
-    setTurnstileToken,
+    turnstileResetKey,
+    handleTurnstileVerify,
+    handleTurnstileError,
+    resetTurnstile,
     validateTurnstile,
   } = useTurnstile()
   const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
@@ -87,6 +96,7 @@ export function SignUpForm({
     resolver: zodResolver(registerFormSchema),
     defaultValues: {
       username: '',
+      registrationCode: '',
       email: '',
       password: '',
       confirmPassword: '',
@@ -94,7 +104,12 @@ export function SignUpForm({
   })
 
   const emailValue = form.watch('email')
+  const registrationCodeValue = form.watch('registrationCode') ?? ''
   const emailVerificationRequired = !!status?.email_verification
+  const registrationCodeRequired = Boolean(
+    status?.registration_code_register_enabled ??
+    status?.data?.registration_code_register_enabled
+  )
   const hasUserAgreement = Boolean(status?.user_agreement_enabled)
   const hasPrivacyPolicy = Boolean(status?.privacy_policy_enabled)
   const requiresLegalConsent = hasUserAgreement || hasPrivacyPolicy
@@ -104,6 +119,26 @@ export function SignUpForm({
     true
   const hasWeChatLogin = Boolean(status?.wechat_login)
   const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
+
+  const getNormalizedRegistrationCode = () =>
+    registrationCodeValue.trim().toUpperCase()
+
+  const validateRegistrationCodeBeforeThirdPartyStart = () => {
+    if (!registrationCodeRequired) return true
+
+    const registrationCode = getNormalizedRegistrationCode()
+    if (REGISTRATION_CODE_REGEX.test(registrationCode)) {
+      form.clearErrors('registrationCode')
+      return true
+    }
+
+    form.setError('registrationCode', {
+      message: t('Enter a 20-character registration code'),
+    })
+    form.setFocus('registrationCode')
+    toast.error(t('Please enter your registration code'))
+    return false
+  }
 
   const wechatQrCodeUrl = useMemo(() => {
     return (
@@ -154,6 +189,17 @@ export function SignUpForm({
 
     if (!validateTurnstile()) return
 
+    const registrationCode = (data.registrationCode ?? '').trim().toUpperCase()
+    if (
+      registrationCodeRequired &&
+      !REGISTRATION_CODE_REGEX.test(registrationCode)
+    ) {
+      form.setError('registrationCode', {
+        message: t('Enter a 20-character registration code'),
+      })
+      return
+    }
+
     setIsLoading(true)
     try {
       const res = await register({
@@ -162,6 +208,9 @@ export function SignUpForm({
         email: data.email || undefined,
         verification_code: verificationCode || undefined,
         aff_code: getAffiliateCode(),
+        registration_code: registrationCodeRequired
+          ? registrationCode
+          : undefined,
         turnstile: turnstileToken,
       })
 
@@ -169,9 +218,11 @@ export function SignUpForm({
         toast.success(t('Account created! Please sign in'))
         redirectToLogin()
       } else {
+        resetTurnstile()
         toast.error(res?.message || t('Failed to create account'))
       }
-    } catch (_error) {
+    } catch {
+      resetTurnstile()
       // Errors are handled by global interceptor
     } finally {
       setIsLoading(false)
@@ -187,6 +238,7 @@ export function SignUpForm({
       toast.error(legalConsentErrorMessage)
       return
     }
+    if (!validateRegistrationCodeBeforeThirdPartyStart()) return
 
     setIsWeChatDialogOpen(true)
   }
@@ -204,10 +256,14 @@ export function SignUpForm({
       toast.error(t('Please enter the verification code'))
       return
     }
+    if (!validateRegistrationCodeBeforeThirdPartyStart()) return
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode)
+      const res = await wechatLoginByCode(
+        wechatCode,
+        registrationCodeRequired ? getNormalizedRegistrationCode() : undefined
+      )
       if (res?.success) {
         await handleLoginSuccess(res.data as { id?: number } | null)
         toast.success(t('Signed in via WeChat'))
@@ -215,7 +271,7 @@ export function SignUpForm({
       } else {
         toast.error(res?.message || t('Login failed'))
       }
-    } catch (_error) {
+    } catch {
       toast.error(t('Login failed'))
     } finally {
       setIsWeChatSubmitting(false)
@@ -229,6 +285,42 @@ export function SignUpForm({
         className={cn('grid gap-4', className)}
         {...props}
       >
+        {registrationCodeRequired && (
+          <FormField
+            control={form.control}
+            name='registrationCode'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Registration code')}</FormLabel>
+                <FormControl>
+                  <Input
+                    placeholder={t('Please enter your registration code')}
+                    autoComplete='one-time-code'
+                    maxLength={REGISTRATION_CODE_LENGTH}
+                    value={field.value ?? ''}
+                    onChange={(event) => {
+                      const value = event.target.value
+                        .toUpperCase()
+                        .replaceAll(/[^A-Z0-9]/g, '')
+                        .slice(0, REGISTRATION_CODE_LENGTH)
+                      field.onChange(value)
+                    }}
+                    onBlur={field.onBlur}
+                    name={field.name}
+                    ref={field.ref}
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t(
+                    'Enter the 20-character code provided by the administrator.'
+                  )}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
+
         {/* Username Field */}
         <FormField
           control={form.control}
@@ -322,13 +414,13 @@ export function SignUpForm({
                 }
                 onClick={handleSendVerificationCode}
               >
-                {isActive ? (
-                  t('Resend ({{seconds}}s)', { seconds: secondsLeft })
-                ) : isSendingCode ? (
+                {isActive
+                  ? t('Resend ({{seconds}}s)', { seconds: secondsLeft })
+                  : null}
+                {!isActive && isSendingCode ? (
                   <Loader2 className='h-4 w-4 animate-spin' />
-                ) : (
-                  t('Send code')
-                )}
+                ) : null}
+                {!isActive && !isSendingCode ? t('Send code') : null}
               </Button>
             </div>
           </>
@@ -339,7 +431,10 @@ export function SignUpForm({
           <div className='mt-2'>
             <Turnstile
               siteKey={turnstileSiteKey}
-              onVerify={setTurnstileToken}
+              onVerify={handleTurnstileVerify}
+              onExpire={resetTurnstile}
+              onError={handleTurnstileError}
+              resetKey={turnstileResetKey}
             />
           </div>
         )}

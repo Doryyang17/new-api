@@ -1,14 +1,17 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -26,6 +29,22 @@ func GenerateOAuthCode(c *gin.Context) {
 	affCode := c.Query("aff")
 	if affCode != "" {
 		session.Set("aff", affCode)
+	}
+	session.Delete(oauthRegistrationCodeSessionKey)
+	session.Delete(oauthPendingRegistrationSessionKey)
+	rawRegistrationCode, hasRegistrationCode := c.GetQuery("registration_code")
+	if hasRegistrationCode {
+		if err := session.Save(); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
+	if common.RegistrationCodeRegisterEnabled && hasRegistrationCode {
+		registrationCode, _, ok := validateRegistrationCodeForNewUser(c, rawRegistrationCode)
+		if !ok {
+			return
+		}
+		session.Set(oauthRegistrationCodeSessionKey, registrationCode)
 	}
 	session.Set("oauth_state", state)
 	err := session.Save()
@@ -106,11 +125,19 @@ func HandleOAuth(c *gin.Context) {
 	// 7. Find or create user
 	user, err := findOrCreateOAuthUser(c, provider, oauthUser, session)
 	if err != nil {
-		switch err.(type) {
+		if errors.Is(err, model.ErrRegistrationCodeInvalid) {
+			common.ApiErrorMsg(c, registrationCodeInvalidMessage)
+			return
+		}
+		switch e := err.(type) {
 		case *OAuthUserDeletedError:
 			common.ApiErrorI18n(c, i18n.MsgOAuthUserDeleted)
 		case *OAuthRegistrationDisabledError:
 			common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
+		case *OAuthRegistrationCodeRequiredError:
+			storeOAuthPendingRegistration(c, session, providerName, provider, oauthUser)
+		case *OAuthRegistrationRiskBlockedError:
+			respondRegistrationRiskBlocked(c, e.RetryAfter)
 		default:
 			common.ApiError(c, err)
 		}
@@ -195,21 +222,20 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 	})
 }
 
-// findOrCreateOAuthUser finds existing user or creates new user
-func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, session sessions.Session) (*model.User, error) {
+func findExistingOAuthUser(provider oauth.Provider, oauthUser *oauth.OAuthUser) (*model.User, bool, error) {
 	user := &model.User{}
 
 	// Check if user already exists with new ID
 	if provider.IsUserIDTaken(oauthUser.ProviderUserID) {
 		err := provider.FillUserByProviderID(user, oauthUser.ProviderUserID)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		// Check if user has been deleted
 		if user.Id == 0 {
-			return nil, &OAuthUserDeletedError{}
+			return nil, false, &OAuthUserDeletedError{}
 		}
-		return user, nil
+		return user, true, nil
 	}
 
 	// Try to find user with legacy ID (for GitHub migration from login to numeric ID)
@@ -217,7 +243,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		if provider.IsUserIDTaken(legacyID) {
 			err := provider.FillUserByProviderID(user, legacyID)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			if user.Id != 0 {
 				// Found user with legacy ID, migrate to new ID
@@ -227,16 +253,60 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 					common.SysError(fmt.Sprintf("[OAuth] Failed to migrate user %d: %s", user.Id, err.Error()))
 					// Continue with login even if migration fails
 				}
-				return user, nil
+				return user, true, nil
 			}
 		}
+	}
+
+	return nil, false, nil
+}
+
+// findOrCreateOAuthUser finds existing user or creates new user
+func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, session sessions.Session) (*model.User, error) {
+	if user, found, err := findExistingOAuthUser(provider, oauthUser); err != nil || found {
+		return user, err
 	}
 
 	// User doesn't exist, create new user if registration is enabled
 	if !common.RegisterEnabled {
 		return nil, &OAuthRegistrationDisabledError{}
 	}
+	registrationCode, registrationRiskKeys, err := prepareOAuthRegistrationCodeForNewUser(c, session)
+	if err != nil {
+		return nil, err
+	}
 
+	return createOAuthUserForNewUser(c, provider, oauthUser, session, registrationCode, registrationRiskKeys)
+}
+
+func findOrCreateOAuthUserWithRegistrationCode(
+	c *gin.Context,
+	provider oauth.Provider,
+	oauthUser *oauth.OAuthUser,
+	session sessions.Session,
+	registrationCode string,
+	registrationRiskKeys []string,
+) (*model.User, error) {
+	if user, found, err := findExistingOAuthUser(provider, oauthUser); err != nil || found {
+		return user, err
+	}
+
+	if !common.RegisterEnabled {
+		return nil, &OAuthRegistrationDisabledError{}
+	}
+
+	return createOAuthUserForNewUser(c, provider, oauthUser, session, registrationCode, registrationRiskKeys)
+}
+
+func createOAuthUserForNewUser(
+	c *gin.Context,
+	provider oauth.Provider,
+	oauthUser *oauth.OAuthUser,
+	session sessions.Session,
+	registrationCode string,
+	registrationRiskKeys []string,
+) (*model.User, error) {
+	user := &model.User{}
 	// Set up new user
 	user.Username = provider.GetProviderPrefix() + strconv.Itoa(model.GetMaxUserId()+1)
 
@@ -287,10 +357,18 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 			if err := model.CreateUserOAuthBindingWithTx(tx, binding); err != nil {
 				return err
 			}
+			if common.RegistrationCodeRegisterEnabled {
+				if err := model.UseRegistrationCodeWithTx(tx, registrationCode, user.Id); err != nil {
+					return err
+				}
+			}
 
 			return nil
 		})
 		if err != nil {
+			if errors.Is(err, model.ErrRegistrationCodeInvalid) {
+				service.RecordRegistrationCodeFailure(registrationRiskKeys)
+			}
 			return nil, err
 		}
 
@@ -316,15 +394,27 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 			}).Error; err != nil {
 				return err
 			}
+			if common.RegistrationCodeRegisterEnabled {
+				if err := model.UseRegistrationCodeWithTx(tx, registrationCode, user.Id); err != nil {
+					return err
+				}
+			}
 
 			return nil
 		})
 		if err != nil {
+			if errors.Is(err, model.ErrRegistrationCodeInvalid) {
+				service.RecordRegistrationCodeFailure(registrationRiskKeys)
+			}
 			return nil, err
 		}
 
 		// Perform post-transaction tasks
 		user.FinalizeOAuthUserCreation(inviterId)
+	}
+	if common.RegistrationCodeRegisterEnabled {
+		service.ResetRegistrationCodeFailures(registrationRiskKeys)
+		session.Delete(oauthRegistrationCodeSessionKey)
 	}
 
 	return user, nil
@@ -341,6 +431,20 @@ type OAuthRegistrationDisabledError struct{}
 
 func (e *OAuthRegistrationDisabledError) Error() string {
 	return "registration is disabled"
+}
+
+type OAuthRegistrationCodeRequiredError struct{}
+
+func (e *OAuthRegistrationCodeRequiredError) Error() string {
+	return "registration code is required"
+}
+
+type OAuthRegistrationRiskBlockedError struct {
+	RetryAfter time.Duration
+}
+
+func (e *OAuthRegistrationRiskBlockedError) Error() string {
+	return "registration risk blocked"
 }
 
 // handleOAuthError handles OAuth errors and returns translated message
