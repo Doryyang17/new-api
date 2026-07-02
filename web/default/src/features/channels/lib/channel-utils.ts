@@ -357,12 +357,12 @@ export function getBalanceVariant(
 // Response Time Utilities
 // ============================================================================
 
-/** Optional i18n: (key, options) => string, e.g. useTranslation().t */
+/** Optional label formatter, e.g. useTranslation().t in legacy callers. */
 type TFunction = (key: string, options?: { value?: number | string }) => string
 
 /**
  * Format response time in milliseconds to human-readable.
- * Pass `t` from useTranslation() for i18n (e.g. "Not tested", "{{value}}ms", "{{value}}s").
+ * Pass a formatter when the caller needs existing label mapping.
  */
 export function formatResponseTime(timeMs: number, t?: TFunction): string {
   if (timeMs === 0) {

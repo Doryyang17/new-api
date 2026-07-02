@@ -16,12 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import * as React from 'react'
 import { ChevronDownIcon } from 'lucide-react'
-import { enUS, fr, ja, ru, vi, zhCN } from 'react-day-picker/locale'
+import * as React from 'react'
+import { zhCN } from 'react-day-picker/locale'
 import { useTranslation } from 'react-i18next'
-import dayjs from '@/lib/dayjs'
-import { cn } from '@/lib/utils'
+
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
@@ -30,15 +29,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-
-const calendarLocales = {
-  en: enUS,
-  zh: zhCN,
-  fr,
-  ru,
-  ja,
-  vi,
-} as const
+import dayjs from '@/lib/dayjs'
+import { cn } from '@/lib/utils'
 
 interface DateTimePickerProps {
   value?: Date
@@ -53,10 +45,8 @@ export function DateTimePicker({
   placeholder,
   className,
 }: DateTimePickerProps) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const placeholderText = placeholder ?? t('Select date')
-  const calendarLocale =
-    calendarLocales[i18n.language as keyof typeof calendarLocales] ?? enUS
   const currentYear = new Date().getFullYear()
   const [open, setOpen] = React.useState(false)
   const [date, setDate] = React.useState<Date | undefined>(value)
@@ -134,7 +124,7 @@ export function DateTimePicker({
             onMonthChange={setMonth}
             captionLayout='dropdown'
             onSelect={handleDateSelect}
-            locale={calendarLocale}
+            locale={zhCN}
             startMonth={new Date(currentYear - 100, 0)}
             endMonth={new Date(currentYear + 100, 11)}
           />

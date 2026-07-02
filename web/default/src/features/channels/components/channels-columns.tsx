@@ -294,7 +294,7 @@ const SENSITIVE_MASK = '••••'
  * Balance cell component with click to update
  */
 function BalanceCell({ channel }: { channel: Channel }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const layout = useContext(ChannelRowActionsLayoutContext)
   const { sensitiveVisible } = useChannels()
@@ -310,7 +310,7 @@ function BalanceCell({ channel }: { channel: Channel }) {
   const withSuffix = (value: string) =>
     tokenSuffix && value !== '-' ? `${value}${tokenSuffix}` : value
 
-  const locale = i18n.resolvedLanguage || i18n.language
+  const locale = 'zh'
   const balanceFormatOptions = {
     digitsLarge: 2,
     digitsSmall: 4,
@@ -516,10 +516,10 @@ export function useChannelsColumns(
     enableSelection?: boolean
   } = {}
 ): ColumnDef<Channel>[] {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const { sensitiveVisible } = useChannels()
   const enableSelection = options.enableSelection ?? true
-  const locale = i18n.resolvedLanguage || i18n.language
+  const locale = 'zh'
   // The column definitions only depend on the translation function, the active
   // locale, and sensitive-data visibility. Memoizing keeps the array (and every
   // cell renderer reference) stable across unrelated re-renders, so react-table

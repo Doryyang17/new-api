@@ -12,10 +12,10 @@ const StatusCodeRiskGuardModal = React.memo(function StatusCodeRiskGuardModal({
   onCancel,
   onConfirm,
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const checklist = useMemo(
     () => STATUS_CODE_RISK_CHECKLIST_KEYS.map((item) => t(item)),
-    [t, i18n.language],
+    [t],
   );
 
   return (

@@ -199,6 +199,21 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
 		}
 
+		promptFilterRoute := apiRouter.Group("/prompt-filter")
+		promptFilterRoute.Use(middleware.RootAuth())
+		{
+			promptFilterRoute.GET("/status", controller.GetPromptFilterStatus)
+			promptFilterRoute.GET("/rules", controller.GetPromptFilterRules)
+			promptFilterRoute.POST("/rules/test", controller.TestPromptFilterRulePattern)
+			promptFilterRoute.GET("/lexicons", controller.ListPromptFilterLexicons)
+			promptFilterRoute.POST("/lexicons", controller.UploadPromptFilterLexicon)
+			promptFilterRoute.PATCH("/lexicons/:id", controller.UpdatePromptFilterLexicon)
+			promptFilterRoute.DELETE("/lexicons/:id", controller.DeletePromptFilterLexicon)
+			promptFilterRoute.GET("/logs", controller.ListPromptFilterLogs)
+			promptFilterRoute.DELETE("/logs", controller.ClearPromptFilterLogs)
+			promptFilterRoute.POST("/test", controller.TestPromptFilter)
+		}
+
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")
 		customOAuthRoute.Use(middleware.RootAuth())

@@ -151,7 +151,7 @@ const CurfewHome = () => (
 );
 
 const Home = () => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [statusState] = useContext(StatusContext);
   const actualTheme = useActualTheme();
   const [homePageContentLoaded, setHomePageContentLoaded] = useState(false);
@@ -164,7 +164,7 @@ const Home = () => {
     statusState?.status?.server_address || `${window.location.origin}`;
   const endpointItems = API_ENDPOINTS.map((e) => ({ value: e }));
   const [endpointIndex, setEndpointIndex] = useState(0);
-  const isChinese = i18n.language.startsWith('zh');
+  const isChinese = true;
   const [curfewActive, setCurfewActive] = useState(isSystemCurfewActive());
 
   const displayHomePageContent = async () => {
@@ -191,7 +191,7 @@ const Home = () => {
           if (iframe) {
             iframe.onload = () => {
               iframe.contentWindow.postMessage({ themeMode: actualTheme }, '*');
-              iframe.contentWindow.postMessage({ lang: i18n.language }, '*');
+              iframe.contentWindow.postMessage({ lang: 'zh-CN' }, '*');
             };
           }
         }

@@ -15,7 +15,6 @@
     "format": "node scripts/format-with-protected-headers.mjs --write",
     "copyright:check": "node scripts/add-copyright.mjs --check",
     "copyright": "node scripts/add-copyright.mjs",
-    "i18n:sync": "node scripts/sync-i18n.mjs",
     "knip": "knip"
   },
   "dependencies": {
@@ -48,7 +47,6 @@
     "dayjs": "catalog:",
     "dompurify": "3.4.11",
     "i18next": "^26.2.0",
-    "i18next-browser-languagedetector": "^8.2.1",
     "input-otp": "^1.4.2",
     "katex": "^0.17.0",
     "lucide-react": "^1.16.0",

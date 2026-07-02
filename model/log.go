@@ -367,6 +367,26 @@ func RecordDailyUsageLimitRejectLog(c *gin.Context, content string, other map[st
 	)
 }
 
+func RecordPromptFilterRejectLog(c *gin.Context, content string, other map[string]interface{}) {
+	if other == nil {
+		other = map[string]interface{}{}
+	}
+	other["reject_reason"] = "prompt_filter"
+	RecordErrorLog(
+		c,
+		c.GetInt("id"),
+		common.GetContextKeyInt(c, constant.ContextKeyChannelId),
+		common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		c.GetString("token_name"),
+		content,
+		c.GetInt("token_id"),
+		0,
+		common.GetContextKeyBool(c, constant.ContextKeyIsStream),
+		common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+		other,
+	)
+}
+
 type RecordConsumeLogParams struct {
 	ChannelId        int                    `json:"channel_id"`
 	PromptTokens     int                    `json:"prompt_tokens"`

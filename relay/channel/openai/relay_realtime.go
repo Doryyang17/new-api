@@ -9,6 +9,8 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -59,6 +61,10 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 				err = common.Unmarshal(message, realtimeEvent)
 				if err != nil {
 					errChan <- fmt.Errorf("error unmarshalling message: %v", err)
+					return
+				}
+				if blockRealtimePromptFilter(c, clientConn, message) {
+					close(clientClosed)
 					return
 				}
 
@@ -221,6 +227,32 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 	// check usage total tokens, if 0, use local usage
 
 	return nil, sumUsage
+}
+
+func blockRealtimePromptFilter(c *gin.Context, clientConn *websocket.Conn, message []byte) bool {
+	if !setting.ShouldCheckPromptSensitive() {
+		return false
+	}
+	settings := system_setting.GetPromptFilterSettings()
+	if service.PromptFilterRequestWhitelisted(c, settings) {
+		return false
+	}
+	verdict := service.InspectPromptRequestBodyWithContext(c.Request.Context(), message, "application/json", "realtime")
+	if verdict.Action == service.PromptFilterActionWarn || verdict.Action == service.PromptFilterActionWatch {
+		service.RecordPromptFilterRejectLog(c, "realtime", verdict)
+		return false
+	}
+	if verdict.Action != service.PromptFilterActionBlock {
+		return false
+	}
+	service.RecordPromptFilterRejectLog(c, "realtime", verdict)
+	helper.WssError(c, clientConn, types.OpenAIError{
+		Message: settings.Message,
+		Type:    "invalid_request_error",
+		Param:   "",
+		Code:    settings.BlockErrorCode,
+	})
+	return true
 }
 
 func preConsumeUsage(ctx *gin.Context, info *relaycommon.RelayInfo, usage *dto.RealtimeUsage, totalUsage *dto.RealtimeUsage) error {

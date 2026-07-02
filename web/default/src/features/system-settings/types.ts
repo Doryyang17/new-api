@@ -39,6 +39,147 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type PromptFilterMode = 'block' | 'warn' | 'monitor'
+
+export type PromptFilterMatch = {
+  name: string
+  weight: number
+  category?: string
+  strict?: boolean
+}
+
+export type PromptFilterVerdict = {
+  enabled: boolean
+  mode: PromptFilterMode
+  action: 'allow' | 'block' | 'warn' | 'monitor'
+  score: number
+  raw_score: number
+  threshold: number
+  strict_hit: boolean
+  matched: PromptFilterMatch[]
+  reason?: string
+  text_preview?: string
+  extracted_chars: number
+  reviewed?: boolean
+  review_flagged?: boolean
+  review_error?: string
+  review_model?: string
+}
+
+export type PromptFilterCustomRule = {
+  name: string
+  pattern: string
+  weight: number
+  category?: string
+  strict?: boolean
+  enabled?: boolean
+}
+
+export type PromptFilterRule = {
+  name: string
+  pattern: string
+  weight: number
+  category?: string
+  strict?: boolean
+  enabled: boolean
+  builtin: boolean
+}
+
+export type PromptFilterRulesData = {
+  builtin_patterns: PromptFilterRule[]
+  custom_patterns: PromptFilterCustomRule[]
+  disabled_patterns: string[]
+}
+
+export type PromptFilterLexiconFile = {
+  id: string
+  name: string
+  original_name: string
+  stored_name: string
+  sha256: string
+  size: number
+  word_count: number
+  category?: string
+  weight: number
+  strict: boolean
+  enabled: boolean
+  uploaded_at: number
+}
+
+export type PromptFilterLexiconsData = {
+  items: PromptFilterLexiconFile[]
+}
+
+export type PromptFilterStatusData = {
+  enabled: boolean
+  mode: PromptFilterMode
+  threshold: number
+  strict_threshold: number
+  log_matches: boolean
+  max_text_length: number
+  builtin_rule_count: number
+  custom_rule_count: number
+  disabled_rule_count: number
+  lexicon_file_count: number
+  lexicon_word_count: number
+  log_total: number
+  review_enabled: boolean
+  review_api_key_configured: boolean
+  block_status_code: number
+  block_error_code: string
+  review_base_url: string
+  review_model: string
+  review_timeout_seconds: number
+  review_fail_closed: boolean
+}
+
+export type PromptFilterLog = {
+  id: number
+  created_at: number
+  source: string
+  endpoint: string
+  model: string
+  action: string
+  mode: string
+  score: number
+  raw_score: number
+  threshold: number
+  strict_hit: boolean
+  matched: PromptFilterMatch[]
+  text_preview: string
+  full_text?: string
+  user_id: number
+  username: string
+  api_key_id: number
+  api_key_name: string
+  channel_id: number
+  channel_name: string
+  group: string
+  client_ip: string
+  request_id: string
+  error_code: string
+  reviewed: boolean
+  review_flagged: boolean
+  review_model: string
+  review_error: string
+  extracted_chars: number
+  status_code: number
+  prompt_filter_msg: string
+}
+
+export type PromptFilterLogsData = {
+  items: PromptFilterLog[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type PromptFilterApiResponse<T> = {
+  success: boolean
+  message: string
+  data: T
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string
@@ -413,6 +554,23 @@ export type SecuritySettings = {
   CheckSensitiveEnabled: boolean
   CheckSensitiveOnPromptEnabled: boolean
   SensitiveWords: string
+  'prompt_filter_setting.mode': 'block' | 'warn' | 'monitor'
+  'prompt_filter_setting.threshold': number
+  'prompt_filter_setting.strict_threshold': number
+  'prompt_filter_setting.log_matches': boolean
+  'prompt_filter_setting.max_text_length': number
+  'prompt_filter_setting.message': string
+  'prompt_filter_setting.block_status_code': number
+  'prompt_filter_setting.block_error_code': string
+  'prompt_filter_setting.group_whitelist': string[]
+  'prompt_filter_setting.channel_whitelist': number[]
+  'prompt_filter_setting.custom_patterns': string
+  'prompt_filter_setting.disabled_patterns': string
+  'prompt_filter_setting.review_enabled': boolean
+  'prompt_filter_setting.review_base_url': string
+  'prompt_filter_setting.review_model': string
+  'prompt_filter_setting.review_timeout_seconds': number
+  'prompt_filter_setting.review_fail_closed': boolean
   'fetch_setting.enable_ssrf_protection': boolean
   'fetch_setting.allow_private_ip': boolean
   'fetch_setting.domain_filter_mode': boolean

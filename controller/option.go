@@ -348,6 +348,13 @@ func UpdateOption(c *gin.Context) {
 		})
 		return
 	}
+	if err := system_setting.ValidatePromptFilterOption(option.Key, option.Value.(string)); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
 	if option.Key == "daily_usage_setting.enabled" {
 		enabled, _ := strconv.ParseBool(strings.TrimSpace(option.Value.(string)))
 		if enabled && system_setting.GetDailyUsageLimitSettings().LimitTokens <= 0 {

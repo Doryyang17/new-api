@@ -218,7 +218,7 @@ func ApiSuccess(c *gin.Context, data any) {
 	})
 }
 
-// ApiErrorI18n returns a translated error message based on the user's language preference
+// ApiErrorI18n returns a translated error message using the Chinese-only compatibility layer.
 // key is the i18n message key, args is optional template data
 func ApiErrorI18n(c *gin.Context, key string, args ...map[string]any) {
 	msg := TranslateMessage(c, key, args...)
@@ -228,7 +228,7 @@ func ApiErrorI18n(c *gin.Context, key string, args ...map[string]any) {
 	})
 }
 
-// ApiSuccessI18n returns a translated success message based on the user's language preference
+// ApiSuccessI18n returns a translated success message using the Chinese-only compatibility layer.
 func ApiSuccessI18n(c *gin.Context, key string, data any, args ...map[string]any) {
 	msg := TranslateMessage(c, key, args...)
 	c.JSON(http.StatusOK, gin.H{

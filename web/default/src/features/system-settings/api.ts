@@ -23,6 +23,13 @@ import type {
   CreateRegistrationCodesResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
+  PromptFilterApiResponse,
+  PromptFilterLexiconFile,
+  PromptFilterLexiconsData,
+  PromptFilterLogsData,
+  PromptFilterRulesData,
+  PromptFilterStatusData,
+  PromptFilterVerdict,
   RegistrationCodeListResponse,
   SystemOptionsResponse,
   SystemTaskListResponse,
@@ -130,5 +137,95 @@ export async function fetchUpstreamRatios(request: FetchUpstreamRatiosRequest) {
     '/api/ratio_sync/fetch',
     request
   )
+  return res.data
+}
+
+export async function getPromptFilterStatus() {
+  const res = await api.get<PromptFilterApiResponse<PromptFilterStatusData>>(
+    '/api/prompt-filter/status'
+  )
+  return res.data
+}
+
+export async function getPromptFilterRules() {
+  const res = await api.get<PromptFilterApiResponse<PromptFilterRulesData>>(
+    '/api/prompt-filter/rules'
+  )
+  return res.data
+}
+
+export async function getPromptFilterLexicons() {
+  const res = await api.get<PromptFilterApiResponse<PromptFilterLexiconsData>>(
+    '/api/prompt-filter/lexicons'
+  )
+  return res.data
+}
+
+export async function uploadPromptFilterLexicon(formData: FormData) {
+  const res = await api.post<
+    PromptFilterApiResponse<{ file: PromptFilterLexiconFile }>
+  >('/api/prompt-filter/lexicons', formData)
+  return res.data
+}
+
+export async function updatePromptFilterLexicon(request: {
+  id: string
+  enabled: boolean
+}) {
+  const res = await api.patch<
+    PromptFilterApiResponse<{ file: PromptFilterLexiconFile }>
+  >(`/api/prompt-filter/lexicons/${request.id}`, { enabled: request.enabled })
+  return res.data
+}
+
+export async function deletePromptFilterLexicon(id: string) {
+  const res = await api.delete<PromptFilterApiResponse<Record<string, never>>>(
+    `/api/prompt-filter/lexicons/${id}`
+  )
+  return res.data
+}
+
+export async function getPromptFilterLogs(params: {
+  page: number
+  page_size: number
+  source?: string
+  action?: string
+  endpoint?: string
+  model?: string
+  api_key_id?: string
+  q?: string
+}) {
+  const res = await api.get<PromptFilterApiResponse<PromptFilterLogsData>>(
+    '/api/prompt-filter/logs',
+    { params }
+  )
+  return res.data
+}
+
+export async function clearPromptFilterLogs() {
+  const res = await api.delete<
+    PromptFilterApiResponse<{ deleted_count: number }>
+  >('/api/prompt-filter/logs')
+  return res.data
+}
+
+export async function testPromptFilter(request: {
+  text: string
+  endpoint: string
+  model: string
+}) {
+  const res = await api.post<
+    PromptFilterApiResponse<{ verdict: PromptFilterVerdict }>
+  >('/api/prompt-filter/test', request)
+  return res.data
+}
+
+export async function testPromptFilterRulePattern(request: {
+  pattern: string
+  text: string
+}) {
+  const res = await api.post<
+    PromptFilterApiResponse<{ matched: boolean; error?: string }>
+  >('/api/prompt-filter/rules/test', request)
   return res.data
 }
