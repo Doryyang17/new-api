@@ -1,3 +1,4 @@
+import fs from 'fs'
 import path from 'path'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
@@ -10,7 +11,45 @@ const semiUiDir = path.resolve(
   path.dirname(require.resolve('@douyinfe/semi-ui')),
   '../..',
 )
-const semiDateFnsDir = path.resolve(semiUiDir, 'node_modules/date-fns')
+const semiFoundationDir = path.resolve(
+  path.dirname(require.resolve('@douyinfe/semi-foundation')),
+  '../..',
+)
+
+function readPackageVersion(packageJsonPath: string) {
+  try {
+    return (
+      JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as {
+        version?: string
+      }
+    ).version
+  } catch {
+    return undefined
+  }
+}
+
+const dateFnsPackageCandidates = [
+  path.resolve(semiUiDir, 'node_modules/date-fns/package.json'),
+  path.resolve(semiFoundationDir, 'node_modules/date-fns/package.json'),
+  (() => {
+    try {
+      return require.resolve('date-fns/package.json')
+    } catch {
+      return undefined
+    }
+  })(),
+].filter(Boolean) as string[]
+
+const semiDateFnsPackageJson =
+  dateFnsPackageCandidates.find((candidate) =>
+    readPackageVersion(candidate)?.startsWith('2.'),
+  ) ?? dateFnsPackageCandidates.find((candidate) => fs.existsSync(candidate))
+
+if (!semiDateFnsPackageJson) {
+  throw new Error('date-fns package for classic frontend was not found')
+}
+
+const semiDateFnsDir = path.dirname(semiDateFnsPackageJson)
 
 export default defineConfig(({ envMode }) => {
   const env = loadEnv({ mode: envMode, prefixes: ['VITE_'] })
