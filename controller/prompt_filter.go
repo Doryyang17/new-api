@@ -24,8 +24,16 @@ type promptFilterRulePatternTestRequest struct {
 	Text    string `json:"text"`
 }
 
-type promptFilterLexiconToggleRequest struct {
-	Enabled bool `json:"enabled"`
+type promptFilterLexiconUpdateRequest struct {
+	Enabled  *bool   `json:"enabled,omitempty"`
+	Name     *string `json:"name,omitempty"`
+	Category *string `json:"category,omitempty"`
+	Weight   *int    `json:"weight,omitempty"`
+	Strict   *bool   `json:"strict,omitempty"`
+}
+
+type promptFilterLexiconWordsUpdateRequest struct {
+	Words []string `json:"words"`
 }
 
 const promptFilterLexiconMultipartOverheadBytes int64 = 256 * 1024
@@ -126,12 +134,66 @@ func UploadPromptFilterLexicon(c *gin.Context) {
 }
 
 func UpdatePromptFilterLexicon(c *gin.Context) {
-	var req promptFilterLexiconToggleRequest
+	var req promptFilterLexiconUpdateRequest
 	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid request body"})
 		return
 	}
-	entry, err := service.SetPromptFilterLexiconEnabled(c.Param("id"), req.Enabled)
+	entry, err := service.UpdatePromptFilterLexicon(c.Param("id"), service.PromptFilterLexiconUpdate{
+		Enabled:  req.Enabled,
+		Name:     req.Name,
+		Category: req.Category,
+		Weight:   req.Weight,
+		Strict:   req.Strict,
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"file": entry,
+		},
+	})
+}
+
+func PreviewPromptFilterLexicon(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
+	preview, err := service.GetPromptFilterLexiconPreview(c.Param("id"), limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    preview,
+	})
+}
+
+func UpdatePromptFilterLexiconWords(c *gin.Context) {
+	if c.Request != nil && c.Request.Body != nil {
+		c.Request.Body = http.MaxBytesReader(
+			c.Writer,
+			c.Request.Body,
+			service.PromptFilterLexiconMaxUploadBytes+promptFilterLexiconMultipartOverheadBytes,
+		)
+	}
+	var req promptFilterLexiconWordsUpdateRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		if common.IsRequestBodyTooLargeError(err) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"success": false,
+				"message": "词库内容不能超过 " + strconv.FormatInt(service.PromptFilterLexiconMaxUploadBytes/1024/1024, 10) + " MB",
+			})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid request body"})
+		return
+	}
+	entry, err := service.UpdatePromptFilterLexiconWords(c.Param("id"), req.Words)
 	if err != nil {
 		common.ApiError(c, err)
 		return

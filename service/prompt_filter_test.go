@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"mime/multipart"
 	"net/http/httptest"
 	"os"
@@ -13,12 +14,15 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func withPromptFilterSettings(t *testing.T, words []string) {
@@ -47,6 +51,37 @@ func withPromptFilterSettings(t *testing.T, words []string) {
 		setting.CheckSensitiveOnPromptEnabled = oldPromptEnabled
 		setting.SensitiveWords = oldWords
 		require.NoError(t, config.GlobalConfig.LoadFromDB(oldConfig))
+	})
+}
+
+func setupPromptFilterOptionDB(t *testing.T) {
+	t.Helper()
+	originalDB := model.DB
+	originalLogDB := model.LOG_DB
+	originalMainDatabaseType := common.MainDatabaseType()
+	originalLogDatabaseType := common.LogDatabaseType()
+	common.OptionMapRWMutex.Lock()
+	originalOptionMap := common.OptionMap
+	common.OptionMap = map[string]string{}
+	common.OptionMapRWMutex.Unlock()
+
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Option{}))
+	model.DB = db
+	model.LOG_DB = db
+
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+		model.DB = originalDB
+		model.LOG_DB = originalLogDB
+		common.SetDatabaseTypes(originalMainDatabaseType, originalLogDatabaseType)
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptionMap
+		common.OptionMapRWMutex.Unlock()
 	})
 }
 
@@ -200,6 +235,190 @@ func TestInspectPromptTextBlocksEnabledLexiconFile(t *testing.T) {
 	require.Equal(t, PromptFilterActionBlock, verdict.Action)
 	require.NotEmpty(t, verdict.Matched)
 	assert.Equal(t, "lexicon:验收词库", verdict.Matched[0].Name)
+}
+
+func TestPromptFilterPresetLexiconsAreVisibleDisabledAndPreviewable(t *testing.T) {
+	withPromptFilterSettings(t, nil)
+
+	files := ListPromptFilterLexiconFiles()
+	require.NotEmpty(t, files)
+	var preset system_setting.PromptFilterLexiconFile
+	for _, file := range files {
+		if file.Source == promptFilterLexiconSourcePreset {
+			preset = file
+			break
+		}
+	}
+	require.NotEmpty(t, preset.ID)
+	assert.False(t, preset.Enabled)
+	assert.Greater(t, preset.WordCount, 0)
+
+	preview, err := GetPromptFilterLexiconPreview(preset.ID, 3)
+	require.NoError(t, err)
+	assert.Equal(t, preset.ID, preview.File.ID)
+	assert.Equal(t, preset.WordCount, preview.Total)
+	assert.LessOrEqual(t, len(preview.Words), 3)
+}
+
+func TestPromptFilterPresetLexiconCanBeEditedAndEnabled(t *testing.T) {
+	withPromptFilterSettings(t, nil)
+	setupPromptFilterOptionDB(t)
+	lexiconDir := t.TempDir()
+	t.Setenv(promptFilterLexiconDirEnv, lexiconDir)
+
+	var preset system_setting.PromptFilterLexiconFile
+	for _, file := range ListPromptFilterLexiconFiles() {
+		if file.Source == promptFilterLexiconSourcePreset {
+			preset = file
+			break
+		}
+	}
+	require.NotEmpty(t, preset.ID)
+
+	entry, err := UpdatePromptFilterLexiconWords(preset.ID, []string{"preset_acceptance_block"})
+	require.NoError(t, err)
+	assert.Equal(t, promptFilterLexiconSourcePreset, entry.Source)
+	assert.False(t, entry.Enabled)
+	assert.Equal(t, 1, entry.WordCount)
+
+	enabled := true
+	entry, err = UpdatePromptFilterLexicon(preset.ID, PromptFilterLexiconUpdate{Enabled: &enabled})
+	require.NoError(t, err)
+	require.True(t, entry.Enabled)
+
+	verdict := InspectPromptText("please check preset_acceptance_block")
+	require.Equal(t, PromptFilterActionBlock, verdict.Action)
+
+	entry, err = UpdatePromptFilterLexiconWords(preset.ID, []string{"preset_after_edit_only"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, entry.WordCount)
+
+	verdict = InspectPromptText("please check preset_acceptance_block")
+	assert.Equal(t, PromptFilterActionAllow, verdict.Action)
+}
+
+func TestPromptFilterPresetLexiconInvalidUpdateDoesNotMaterializeFile(t *testing.T) {
+	withPromptFilterSettings(t, nil)
+	setupPromptFilterOptionDB(t)
+	lexiconDir := t.TempDir()
+	t.Setenv(promptFilterLexiconDirEnv, lexiconDir)
+
+	var preset system_setting.PromptFilterLexiconFile
+	for _, file := range ListPromptFilterLexiconFiles() {
+		if file.Source == promptFilterLexiconSourcePreset {
+			preset = file
+			break
+		}
+	}
+	require.NotEmpty(t, preset.ID)
+
+	emptyName := " "
+	_, err := UpdatePromptFilterLexicon(preset.ID, PromptFilterLexiconUpdate{Name: &emptyName})
+	require.Error(t, err)
+
+	entries, err := os.ReadDir(lexiconDir)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+	assert.Empty(t, system_setting.GetPromptFilterSettings().LexiconFiles)
+}
+
+func TestPromptFilterLexiconPendingWriteDoesNotOverwriteBeforeCommit(t *testing.T) {
+	lexiconDir := t.TempDir()
+	t.Setenv(promptFilterLexiconDirEnv, lexiconDir)
+	entry := system_setting.PromptFilterLexiconFile{
+		ID:           "existing",
+		Name:         "existing",
+		OriginalName: "existing.txt",
+		StoredName:   "existing_existing.txt",
+		Weight:       100,
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(lexiconDir, entry.StoredName), []byte("old_word\n"), 0644))
+
+	result, err := writePromptFilterLexiconWords(entry, []string{"new_word"}, true)
+	require.NoError(t, err)
+
+	officialData, err := os.ReadFile(filepath.Join(lexiconDir, entry.StoredName))
+	require.NoError(t, err)
+	assert.Equal(t, "old_word\n", string(officialData))
+
+	pendingData, err := os.ReadFile(filepath.Join(lexiconDir, result.tempName))
+	require.NoError(t, err)
+	assert.Equal(t, "new_word\n", string(pendingData))
+
+	removePromptFilterLexiconWriteResult(result)
+	_, err = os.Stat(filepath.Join(lexiconDir, result.tempName))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	officialData, err = os.ReadFile(filepath.Join(lexiconDir, entry.StoredName))
+	require.NoError(t, err)
+	assert.Equal(t, "old_word\n", string(officialData))
+
+	result, err = writePromptFilterLexiconWords(entry, []string{"new_word"}, true)
+	require.NoError(t, err)
+	rollback, err := commitPromptFilterLexiconWriteResult(result)
+	require.NoError(t, err)
+	require.NoError(t, rollback())
+	officialData, err = os.ReadFile(filepath.Join(lexiconDir, entry.StoredName))
+	require.NoError(t, err)
+	assert.Equal(t, "old_word\n", string(officialData))
+
+	result, err = writePromptFilterLexiconWords(entry, []string{"new_word"}, true)
+	require.NoError(t, err)
+	_, err = commitPromptFilterLexiconWriteResult(result)
+	require.NoError(t, err)
+	officialData, err = os.ReadFile(filepath.Join(lexiconDir, entry.StoredName))
+	require.NoError(t, err)
+	assert.Equal(t, "new_word\n", string(officialData))
+}
+
+func TestUpdatePromptFilterLexiconWordsClearsKeywordMatcherCache(t *testing.T) {
+	withPromptFilterSettings(t, nil)
+	setupPromptFilterOptionDB(t)
+	lexiconDir := t.TempDir()
+	t.Setenv(promptFilterLexiconDirEnv, lexiconDir)
+
+	entry := system_setting.PromptFilterLexiconFile{
+		ID:           "existing",
+		Name:         "existing",
+		OriginalName: "existing.txt",
+		StoredName:   "existing_existing.txt",
+		Size:         int64(len("old_word\n")),
+		WordCount:    1,
+		Category:     "acceptance",
+		Weight:       100,
+		Strict:       true,
+		Enabled:      true,
+		Source:       promptFilterLexiconSourceUpload,
+		UploadedAt:   1,
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(lexiconDir, entry.StoredName), []byte("old_word\n"), 0644))
+	require.NoError(t, savePromptFilterLexiconFiles([]system_setting.PromptFilterLexiconFile{entry}))
+
+	staleMatcher := newPromptFilterKeywordMatcher([]promptFilterKeyword{{
+		key:      "lexicon:existing:old_word",
+		word:     "old_word",
+		name:     "lexicon:existing",
+		weight:   100,
+		category: "acceptance",
+		strict:   true,
+	}})
+	promptFilterKeywordCacheMu.Lock()
+	promptFilterKeywordCachedKey = "stale-future-key"
+	promptFilterKeywordCacheValue = staleMatcher
+	promptFilterKeywordCacheMu.Unlock()
+
+	_, err := UpdatePromptFilterLexiconWords(entry.ID, []string{"new_word"})
+	require.NoError(t, err)
+
+	promptFilterKeywordCacheMu.RLock()
+	assert.Empty(t, promptFilterKeywordCachedKey)
+	assert.Nil(t, promptFilterKeywordCacheValue)
+	promptFilterKeywordCacheMu.RUnlock()
+
+	oldVerdict := InspectPromptText("old_word")
+	assert.Equal(t, PromptFilterActionAllow, oldVerdict.Action)
+	newVerdict := InspectPromptText("new_word")
+	require.Equal(t, PromptFilterActionBlock, newVerdict.Action)
+	assert.Equal(t, "lexicon:existing", newVerdict.Matched[0].Name)
 }
 
 func TestExtractPromptTextSkipsMultimodalNonTextFields(t *testing.T) {

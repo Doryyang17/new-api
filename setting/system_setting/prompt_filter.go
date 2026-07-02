@@ -50,6 +50,7 @@ type PromptFilterLexiconFile struct {
 	Weight       int    `json:"weight"`
 	Strict       bool   `json:"strict"`
 	Enabled      bool   `json:"enabled"`
+	Source       string `json:"source,omitempty"`
 	UploadedAt   int64  `json:"uploaded_at"`
 }
 
@@ -363,6 +364,10 @@ func validatePromptFilterLexiconFiles(files []PromptFilterLexiconFile) ([]Prompt
 		file.StoredName = strings.TrimSpace(file.StoredName)
 		file.SHA256 = strings.ToLower(strings.TrimSpace(file.SHA256))
 		file.Category = strings.TrimSpace(file.Category)
+		file.Source = strings.TrimSpace(file.Source)
+		if file.Source == "" {
+			file.Source = "upload"
+		}
 		if file.ID == "" {
 			return nil, fmt.Errorf("prompt filter lexicon file id cannot be empty")
 		}

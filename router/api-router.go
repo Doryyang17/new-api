@@ -207,6 +207,8 @@ func SetApiRouter(router *gin.Engine) {
 			promptFilterRoute.POST("/rules/test", controller.TestPromptFilterRulePattern)
 			promptFilterRoute.GET("/lexicons", controller.ListPromptFilterLexicons)
 			promptFilterRoute.POST("/lexicons", controller.UploadPromptFilterLexicon)
+			promptFilterRoute.GET("/lexicons/:id/preview", controller.PreviewPromptFilterLexicon)
+			promptFilterRoute.PUT("/lexicons/:id/words", controller.UpdatePromptFilterLexiconWords)
 			promptFilterRoute.PATCH("/lexicons/:id", controller.UpdatePromptFilterLexicon)
 			promptFilterRoute.DELETE("/lexicons/:id", controller.DeletePromptFilterLexicon)
 			promptFilterRoute.GET("/logs", controller.ListPromptFilterLogs)

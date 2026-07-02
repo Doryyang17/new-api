@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -36,6 +37,27 @@ type PromptFilterLexiconUploadOptions struct {
 	Enabled  bool
 }
 
+type PromptFilterLexiconUpdate struct {
+	Enabled  *bool
+	Name     *string
+	Category *string
+	Weight   *int
+	Strict   *bool
+}
+
+type PromptFilterLexiconPreview struct {
+	File      system_setting.PromptFilterLexiconFile `json:"file"`
+	Words     []string                               `json:"words"`
+	Total     int                                    `json:"total"`
+	Truncated bool                                   `json:"truncated"`
+}
+
+type promptFilterLexiconWriteResult struct {
+	file       system_setting.PromptFilterLexiconFile
+	tempName   string
+	commitName string
+}
+
 type promptFilterKeyword struct {
 	key      string
 	word     string
@@ -55,8 +77,33 @@ type promptFilterKeywordMatcher struct {
 }
 
 func ListPromptFilterLexiconFiles() []system_setting.PromptFilterLexiconFile {
-	files := system_setting.GetPromptFilterSettings().LexiconFiles
+	files := append([]system_setting.PromptFilterLexiconFile(nil), system_setting.GetPromptFilterSettings().LexiconFiles...)
+	presets, err := promptFilterPresetLexicons()
+	if err == nil {
+		savedByID := make(map[string]int, len(files))
+		for i := range files {
+			files[i] = promptFilterLexiconFileWithSource(files[i])
+			savedByID[files[i].ID] = i
+		}
+		for _, preset := range presets {
+			if index, ok := savedByID[preset.ID]; ok {
+				files[index].Source = promptFilterLexiconSourcePreset
+				continue
+			}
+			files = append(files, preset)
+		}
+	} else {
+		common.SysError("failed to load prompt filter preset lexicons: " + err.Error())
+	}
 	sort.Slice(files, func(i, j int) bool {
+		if files[i].Source != files[j].Source {
+			if files[i].Source == promptFilterLexiconSourcePreset {
+				return true
+			}
+			if files[j].Source == promptFilterLexiconSourcePreset {
+				return false
+			}
+		}
 		if files[i].UploadedAt == files[j].UploadedAt {
 			return files[i].Name < files[j].Name
 		}
@@ -124,6 +171,7 @@ func UploadPromptFilterLexicon(fileName string, reader io.Reader, size int64, op
 		Weight:       weight,
 		Strict:       options.Strict,
 		Enabled:      options.Enabled,
+		Source:       promptFilterLexiconSourceUpload,
 		UploadedAt:   time.Now().Unix(),
 	}
 
@@ -146,17 +194,43 @@ func UploadPromptFilterLexicon(fileName string, reader io.Reader, size int64, op
 }
 
 func SetPromptFilterLexiconEnabled(id string, enabled bool) (system_setting.PromptFilterLexiconFile, error) {
+	return UpdatePromptFilterLexicon(id, PromptFilterLexiconUpdate{Enabled: &enabled})
+}
+
+func UpdatePromptFilterLexicon(id string, update PromptFilterLexiconUpdate) (system_setting.PromptFilterLexiconFile, error) {
 	id = strings.TrimSpace(id)
 	files := system_setting.GetPromptFilterSettings().LexiconFiles
 	for i := range files {
 		if files[i].ID != id {
 			continue
 		}
-		files[i].Enabled = enabled
+		if err := applyPromptFilterLexiconUpdate(&files[i], update); err != nil {
+			return system_setting.PromptFilterLexiconFile{}, err
+		}
 		if err := savePromptFilterLexiconFiles(files); err != nil {
 			return system_setting.PromptFilterLexiconFile{}, err
 		}
 		return files[i], nil
+	}
+	preset, ok, err := promptFilterPresetLexiconByID(id)
+	if err != nil {
+		return system_setting.PromptFilterLexiconFile{}, err
+	}
+	if ok {
+		entry := preset
+		if err := applyPromptFilterLexiconUpdate(&entry, update); err != nil {
+			return system_setting.PromptFilterLexiconFile{}, err
+		}
+		entry, err = materializePromptFilterPresetLexicon(entry)
+		if err != nil {
+			return system_setting.PromptFilterLexiconFile{}, err
+		}
+		files = append(files, entry)
+		if err := savePromptFilterLexiconFiles(files); err != nil {
+			_ = os.Remove(filepath.Join(promptFilterLexiconDir(), entry.StoredName))
+			return system_setting.PromptFilterLexiconFile{}, err
+		}
+		return entry, nil
 	}
 	return system_setting.PromptFilterLexiconFile{}, fmt.Errorf("词库文件不存在")
 }
@@ -175,6 +249,11 @@ func DeletePromptFilterLexicon(id string) error {
 		nextFiles = append(nextFiles, files[i])
 	}
 	if deleted == nil {
+		if _, ok, err := promptFilterPresetLexiconByID(id); err != nil {
+			return err
+		} else if ok {
+			return nil
+		}
 		return fmt.Errorf("词库文件不存在")
 	}
 	if err := savePromptFilterLexiconFiles(nextFiles); err != nil {
@@ -182,6 +261,86 @@ func DeletePromptFilterLexicon(id string) error {
 	}
 	_ = os.Remove(filepath.Join(promptFilterLexiconDir(), deleted.StoredName))
 	return nil
+}
+
+func GetPromptFilterLexiconPreview(id string, limit int) (PromptFilterLexiconPreview, error) {
+	file, words, err := loadPromptFilterLexiconWords(id)
+	if err != nil {
+		return PromptFilterLexiconPreview{}, err
+	}
+	total := len(words)
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > maxPromptFilterLexiconWords {
+		limit = maxPromptFilterLexiconWords
+	}
+	truncated := total > limit
+	if truncated {
+		words = words[:limit]
+	}
+	return PromptFilterLexiconPreview{
+		File:      file,
+		Words:     words,
+		Total:     total,
+		Truncated: truncated,
+	}, nil
+}
+
+func UpdatePromptFilterLexiconWords(id string, words []string) (system_setting.PromptFilterLexiconFile, error) {
+	id = strings.TrimSpace(id)
+	words = normalizePromptFilterLexiconWords(words)
+	if len(words) == 0 {
+		return system_setting.PromptFilterLexiconFile{}, fmt.Errorf("词库文件没有可保存的词条")
+	}
+	files := system_setting.GetPromptFilterSettings().LexiconFiles
+	for i := range files {
+		if files[i].ID != id {
+			continue
+		}
+		entry := promptFilterLexiconFileWithSource(files[i])
+		oldStoredName := entry.StoredName
+		writeResult, err := writePromptFilterLexiconWords(entry, words, true)
+		if err != nil {
+			return system_setting.PromptFilterLexiconFile{}, err
+		}
+		entry = writeResult.file
+		rollback, err := commitPromptFilterLexiconWriteResult(writeResult)
+		if err != nil {
+			removePromptFilterLexiconWriteResult(writeResult)
+			return system_setting.PromptFilterLexiconFile{}, err
+		}
+		files[i] = entry
+		if err := savePromptFilterLexiconFiles(files); err != nil {
+			if rollbackErr := rollback(); rollbackErr != nil {
+				common.SysError("failed to rollback prompt filter lexicon file: " + rollbackErr.Error())
+			}
+			invalidatePromptFilterKeywordMatcherCache()
+			return system_setting.PromptFilterLexiconFile{}, err
+		}
+		invalidatePromptFilterKeywordMatcherCache()
+		removePromptFilterLexiconFileIfChanged(oldStoredName, entry.StoredName)
+		return entry, nil
+	}
+
+	preset, ok, err := promptFilterPresetLexiconByID(id)
+	if err != nil {
+		return system_setting.PromptFilterLexiconFile{}, err
+	}
+	if !ok {
+		return system_setting.PromptFilterLexiconFile{}, fmt.Errorf("词库文件不存在")
+	}
+	writeResult, err := writePromptFilterLexiconWords(preset, words, false)
+	if err != nil {
+		return system_setting.PromptFilterLexiconFile{}, err
+	}
+	entry := writeResult.file
+	files = append(files, entry)
+	if err := savePromptFilterLexiconFiles(files); err != nil {
+		removePromptFilterLexiconWriteResult(writeResult)
+		return system_setting.PromptFilterLexiconFile{}, err
+	}
+	return entry, nil
 }
 
 func ParsePromptFilterLexiconWords(fileName string, data []byte) ([]string, error) {
@@ -324,6 +483,191 @@ func normalizePromptFilterLexiconWords(words []string) []string {
 		}
 	}
 	return normalized
+}
+
+func materializePromptFilterPresetLexicon(preset system_setting.PromptFilterLexiconFile) (system_setting.PromptFilterLexiconFile, error) {
+	words, err := readPromptFilterPresetLexiconWords(preset.ID)
+	if err != nil {
+		return system_setting.PromptFilterLexiconFile{}, err
+	}
+	if len(words) == 0 {
+		return system_setting.PromptFilterLexiconFile{}, fmt.Errorf("预设词库没有可导入的词条")
+	}
+	writeResult, err := writePromptFilterLexiconWords(preset, words, false)
+	if err != nil {
+		return system_setting.PromptFilterLexiconFile{}, err
+	}
+	return writeResult.file, nil
+}
+
+func applyPromptFilterLexiconUpdate(file *system_setting.PromptFilterLexiconFile, update PromptFilterLexiconUpdate) error {
+	if update.Enabled != nil {
+		file.Enabled = *update.Enabled
+	}
+	if update.Name != nil {
+		name := strings.TrimSpace(*update.Name)
+		if name == "" {
+			return fmt.Errorf("词库名称不能为空")
+		}
+		file.Name = name
+	}
+	if update.Category != nil {
+		file.Category = strings.TrimSpace(*update.Category)
+	}
+	if update.Weight != nil {
+		if *update.Weight <= 0 {
+			return fmt.Errorf("词库权重必须大于 0")
+		}
+		file.Weight = *update.Weight
+	}
+	if update.Strict != nil {
+		file.Strict = *update.Strict
+	}
+	*file = promptFilterLexiconFileWithSource(*file)
+	return nil
+}
+
+func loadPromptFilterLexiconWords(id string) (system_setting.PromptFilterLexiconFile, []string, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return system_setting.PromptFilterLexiconFile{}, nil, fmt.Errorf("词库文件不存在")
+	}
+	for _, file := range system_setting.GetPromptFilterSettings().LexiconFiles {
+		if file.ID != id {
+			continue
+		}
+		words, err := readPromptFilterLexiconWords(file)
+		if err != nil {
+			return system_setting.PromptFilterLexiconFile{}, nil, err
+		}
+		return promptFilterLexiconFileWithSource(file), words, nil
+	}
+	preset, ok, err := promptFilterPresetLexiconByID(id)
+	if err != nil {
+		return system_setting.PromptFilterLexiconFile{}, nil, err
+	}
+	if ok {
+		words, err := readPromptFilterPresetLexiconWords(id)
+		if err != nil {
+			return system_setting.PromptFilterLexiconFile{}, nil, err
+		}
+		return preset, words, nil
+	}
+	return system_setting.PromptFilterLexiconFile{}, nil, fmt.Errorf("词库文件不存在")
+}
+
+func writePromptFilterLexiconWords(file system_setting.PromptFilterLexiconFile, words []string, pending bool) (promptFilterLexiconWriteResult, error) {
+	file = promptFilterLexiconFileWithSource(file)
+	file.OriginalName = promptFilterLexiconTextFileName(file.OriginalName)
+	file.StoredName = promptFilterLexiconStoredFileName(file)
+	data := []byte(strings.Join(words, "\n") + "\n")
+	hash := sha256.Sum256(data)
+	if err := os.MkdirAll(promptFilterLexiconDir(), 0755); err != nil {
+		return promptFilterLexiconWriteResult{}, err
+	}
+	writeName := file.StoredName
+	if pending {
+		writeName = file.StoredName + ".pending"
+	}
+	if err := os.WriteFile(filepath.Join(promptFilterLexiconDir(), writeName), data, 0644); err != nil {
+		return promptFilterLexiconWriteResult{}, err
+	}
+	file.SHA256 = hex.EncodeToString(hash[:])
+	file.Size = int64(len(data))
+	file.WordCount = len(words)
+	if file.Weight <= 0 {
+		file.Weight = 100
+	}
+	if file.Name == "" {
+		file.Name = strings.TrimSuffix(file.OriginalName, filepath.Ext(file.OriginalName))
+	}
+	file.UploadedAt = time.Now().Unix()
+	return promptFilterLexiconWriteResult{
+		file:       file,
+		tempName:   writeName,
+		commitName: file.StoredName,
+	}, nil
+}
+
+func promptFilterLexiconFileWithSource(file system_setting.PromptFilterLexiconFile) system_setting.PromptFilterLexiconFile {
+	file.Source = strings.TrimSpace(file.Source)
+	if file.Source == "" {
+		file.Source = promptFilterLexiconSourceUpload
+	}
+	if strings.HasPrefix(file.ID, "preset:") {
+		file.Source = promptFilterLexiconSourcePreset
+	}
+	return file
+}
+
+func promptFilterLexiconTextFileName(fileName string) string {
+	name := strings.TrimSpace(filepath.Base(fileName))
+	if name == "" || name == "." {
+		name = "lexicon.txt"
+	}
+	base := strings.TrimSuffix(name, filepath.Ext(name))
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "lexicon"
+	}
+	return base + ".txt"
+}
+
+func promptFilterLexiconStoredFileName(file system_setting.PromptFilterLexiconFile) string {
+	id := strings.NewReplacer(":", "_", "/", "_", "\\", "_").Replace(file.ID)
+	id = strings.Trim(id, "._-")
+	if id == "" {
+		id = "lexicon"
+	}
+	return id + "_" + safePromptFilterLexiconFileName(file.OriginalName, ".txt")
+}
+
+func removePromptFilterLexiconFileIfChanged(oldStoredName string, newStoredName string) {
+	oldStoredName = strings.TrimSpace(oldStoredName)
+	if oldStoredName == "" || oldStoredName == newStoredName {
+		return
+	}
+	_ = os.Remove(filepath.Join(promptFilterLexiconDir(), oldStoredName))
+}
+
+func commitPromptFilterLexiconWriteResult(result promptFilterLexiconWriteResult) (func() error, error) {
+	rollback := func() error { return nil }
+	if result.tempName == "" || result.tempName == result.commitName {
+		return rollback, nil
+	}
+	commitPath := filepath.Join(promptFilterLexiconDir(), result.commitName)
+	previousData, err := os.ReadFile(commitPath)
+	previousExists := err == nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return rollback, err
+	}
+	if err := os.Rename(filepath.Join(promptFilterLexiconDir(), result.tempName), commitPath); err != nil {
+		return rollback, err
+	}
+	rollback = func() error {
+		if previousExists {
+			return os.WriteFile(commitPath, previousData, 0644)
+		}
+		if err := os.Remove(commitPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	return rollback, nil
+}
+
+func removePromptFilterLexiconWriteResult(result promptFilterLexiconWriteResult) {
+	if result.tempName == "" {
+		return
+	}
+	_ = os.Remove(filepath.Join(promptFilterLexiconDir(), result.tempName))
+}
+
+func invalidatePromptFilterKeywordMatcherCache() {
+	promptFilterKeywordCacheMu.Lock()
+	promptFilterKeywordCachedKey = ""
+	promptFilterKeywordCacheValue = nil
+	promptFilterKeywordCacheMu.Unlock()
 }
 
 func promptFilterKeywords(settings system_setting.PromptFilterSettings) []promptFilterKeyword {

@@ -21,9 +21,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   CheckCircle2,
+  Eye,
   FileText,
+  Pencil,
   Plus,
   RefreshCcw,
+  Save,
   Search,
   ShieldCheck,
   Trash2,
@@ -87,6 +90,8 @@ import {
   getPromptFilterLexicons,
   getPromptFilterRules,
   getPromptFilterStatus,
+  previewPromptFilterLexicon,
+  savePromptFilterLexiconWords,
   testPromptFilter,
   updatePromptFilterLexicon,
   uploadPromptFilterLexicon,
@@ -104,6 +109,7 @@ import { useUpdateOption } from '../hooks/use-update-option'
 import type {
   PromptFilterCustomRule,
   PromptFilterLexiconFile,
+  PromptFilterLexiconPreviewData,
   PromptFilterLog,
   PromptFilterMode,
   PromptFilterRule,
@@ -431,6 +437,14 @@ const selectedLexiconFileLabel = (files: File[]) => {
   return `已选择 ${files.length} 个文件`
 }
 
+const lexiconPreviewLimit = 200
+const lexiconEditLimit = 200_000
+
+const promptFilterLexiconSourceLabel = (source?: string) => {
+  if (source === 'preset') return '预设'
+  return '上传'
+}
+
 type SensitiveWordsSectionProps = {
   defaultValues: FlatPromptFilterDefaults
 }
@@ -519,10 +533,12 @@ export function SensitiveWordsSection(props: SensitiveWordsSectionProps) {
       />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className='grid w-full max-w-2xl grid-cols-3'>
+        <TabsList className='grid w-full max-w-4xl grid-cols-5'>
           <TabsTrigger value='overview'>{t('Overview')}</TabsTrigger>
           <TabsTrigger value='logs'>{t('Trigger Logs')}</TabsTrigger>
           <TabsTrigger value='rules'>{t('Rule Set')}</TabsTrigger>
+          <TabsTrigger value='custom'>自定义规则</TabsTrigger>
+          <TabsTrigger value='lexicons'>词库文件</TabsTrigger>
         </TabsList>
 
         <TabsContent value='overview' className='space-y-4'>
@@ -545,13 +561,26 @@ export function SensitiveWordsSection(props: SensitiveWordsSectionProps) {
         <TabsContent value='rules'>
           <PromptFilterRulesPanel
             rules={rulesQuery.data?.data.builtin_patterns ?? []}
-            customRules={rulesQuery.data?.data.custom_patterns ?? []}
             disabledRules={rulesQuery.data?.data.disabled_patterns ?? []}
             disabled={updateOption.isPending}
             onSaveOption={(key, value) =>
               updateOption.mutateAsync({ key, value })
             }
           />
+        </TabsContent>
+
+        <TabsContent value='custom'>
+          <PromptFilterCustomRulesPanel
+            customRules={rulesQuery.data?.data.custom_patterns ?? []}
+            disabled={updateOption.isPending}
+            onSaveOption={(key, value) =>
+              updateOption.mutateAsync({ key, value })
+            }
+          />
+        </TabsContent>
+
+        <TabsContent value='lexicons'>
+          <PromptFilterLexiconsPanel disabled={updateOption.isPending} />
         </TabsContent>
       </Tabs>
     </SettingsSection>
@@ -1440,7 +1469,6 @@ function PromptFilterLogRow(props: { log: PromptFilterLog }) {
 
 type PromptFilterRulesPanelProps = {
   rules: PromptFilterRule[]
-  customRules: PromptFilterCustomRule[]
   disabledRules: string[]
   disabled: boolean
   onSaveOption: (key: string, value: string) => Promise<unknown>
@@ -1451,14 +1479,6 @@ function PromptFilterRulesPanel(props: PromptFilterRulesPanelProps) {
   const queryClient = useQueryClient()
   const [category, setCategory] = useState('all')
   const [selected, setSelected] = useState<string[]>([])
-  const [customDraft, setCustomDraft] = useState<PromptFilterCustomRule>({
-    name: '',
-    pattern: '',
-    weight: 50,
-    category: 'custom',
-    strict: false,
-    enabled: true,
-  })
   const categories = useMemo(() => uniqueCategories(props.rules), [props.rules])
   const filteredRules = props.rules.filter(
     (rule) => category === 'all' || rule.category === category
@@ -1473,14 +1493,6 @@ function PromptFilterRulesPanel(props: PromptFilterRulesPanelProps) {
     await props.onSaveOption(
       'prompt_filter_setting.disabled_patterns',
       JSON.stringify([...new Set(nextDisabled)])
-    )
-    await queryClient.invalidateQueries({ queryKey: ['prompt-filter'] })
-  }
-
-  const saveCustomRules = async (nextRules: PromptFilterCustomRule[]) => {
-    await props.onSaveOption(
-      'prompt_filter_setting.custom_patterns',
-      JSON.stringify(nextRules)
     )
     await queryClient.invalidateQueries({ queryKey: ['prompt-filter'] })
   }
@@ -1507,43 +1519,8 @@ function PromptFilterRulesPanel(props: PromptFilterRulesPanelProps) {
     )
   }
 
-  const addCustomRule = async () => {
-    const nextRule = {
-      ...customDraft,
-      name: customDraft.name.trim(),
-      pattern: customDraft.pattern.trim(),
-      category: customDraft.category?.trim() || 'custom',
-    }
-    if (!nextRule.name || !nextRule.pattern || nextRule.weight <= 0) {
-      toast.error(t('Custom rule name, pattern, and weight are required'))
-      return
-    }
-    const nextRules = [
-      ...props.customRules.filter((rule) => rule.name !== nextRule.name),
-      nextRule,
-    ]
-    await saveCustomRules(nextRules)
-    setCustomDraft({
-      name: '',
-      pattern: '',
-      weight: 50,
-      category: 'custom',
-      strict: false,
-      enabled: true,
-    })
-  }
-
-  const deleteCustomRule = async (name: string) => {
-    await saveCustomRules(
-      props.customRules.filter((rule) => rule.name !== name)
-    )
-  }
-
   return (
-    <>
-      <PromptFilterLexiconsPanel disabled={props.disabled} />
-
-      <Card>
+    <Card>
       <CardHeader>
         <CardTitle>{t('Built-in Rules')}</CardTitle>
         <CardDescription>
@@ -1669,11 +1646,80 @@ function PromptFilterRulesPanel(props: PromptFilterRulesPanelProps) {
           </TableBody>
         </Table>
 
-        <Separator />
+      </CardContent>
+    </Card>
+  )
+}
 
+type PromptFilterCustomRulesPanelProps = {
+  customRules: PromptFilterCustomRule[]
+  disabled: boolean
+  onSaveOption: (key: string, value: string) => Promise<unknown>
+}
+
+function PromptFilterCustomRulesPanel(props: PromptFilterCustomRulesPanelProps) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [customDraft, setCustomDraft] = useState<PromptFilterCustomRule>({
+    name: '',
+    pattern: '',
+    weight: 50,
+    category: 'custom',
+    strict: false,
+    enabled: true,
+  })
+
+  const saveCustomRules = async (nextRules: PromptFilterCustomRule[]) => {
+    await props.onSaveOption(
+      'prompt_filter_setting.custom_patterns',
+      JSON.stringify(nextRules)
+    )
+    await queryClient.invalidateQueries({ queryKey: ['prompt-filter'] })
+  }
+
+  const addCustomRule = async () => {
+    const nextRule = {
+      ...customDraft,
+      name: customDraft.name.trim(),
+      pattern: customDraft.pattern.trim(),
+      category: customDraft.category?.trim() || 'custom',
+    }
+    if (!nextRule.name || !nextRule.pattern || nextRule.weight <= 0) {
+      toast.error(t('Custom rule name, pattern, and weight are required'))
+      return
+    }
+    const nextRules = [
+      ...props.customRules.filter((rule) => rule.name !== nextRule.name),
+      nextRule,
+    ]
+    await saveCustomRules(nextRules)
+    setCustomDraft({
+      name: '',
+      pattern: '',
+      weight: 50,
+      category: 'custom',
+      strict: false,
+      enabled: true,
+    })
+  }
+
+  const deleteCustomRule = async (name: string) => {
+    await saveCustomRules(
+      props.customRules.filter((rule) => rule.name !== name)
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('Custom Rules')}</CardTitle>
+        <CardDescription>
+          维护少量自定义正则规则，用于本地 Prompt 评分。
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
         <div className='grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]'>
           <div className='space-y-3'>
-            <h3 className='text-sm font-semibold'>{t('Custom Rules')}</h3>
             {props.customRules.length === 0 ? (
               <div className='text-muted-foreground rounded-lg border border-dashed p-4 text-sm'>
                 {t('No custom rules yet.')}
@@ -1792,8 +1838,7 @@ function PromptFilterRulesPanel(props: PromptFilterRulesPanelProps) {
           </div>
         </div>
       </CardContent>
-      </Card>
-    </>
+    </Card>
   )
 }
 
@@ -1884,12 +1929,79 @@ function PromptFilterLexiconsPanel(props: { disabled: boolean }) {
     },
   })
 
+  const [preview, setPreview] =
+    useState<PromptFilterLexiconPreviewData | null>(null)
+  const [previewMode, setPreviewMode] = useState<'preview' | 'edit'>('preview')
+  const [editorText, setEditorText] = useState('')
+
+  const previewMutation = useMutation({
+    mutationFn: async (request: {
+      file: PromptFilterLexiconFile
+      mode: 'preview' | 'edit'
+    }) => {
+      const response = await previewPromptFilterLexicon({
+        id: request.file.id,
+        limit:
+          request.mode === 'edit' ? lexiconEditLimit : lexiconPreviewLimit,
+      })
+      if (!response.success) {
+        throw new Error(response.message || '词库预览失败')
+      }
+      return { data: response.data, mode: request.mode }
+    },
+    onSuccess: (result) => {
+      setPreview(result.data)
+      setPreviewMode(result.mode)
+      setEditorText(result.data.words.join('\n'))
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || '词库预览失败')
+    },
+  })
+
+  const saveWordsMutation = useMutation({
+    mutationFn: async () => {
+      if (!preview) {
+        throw new Error('请先选择词库')
+      }
+      const words = editorText
+        .split(/\r?\n/)
+        .map((word) => word.trim())
+        .filter(Boolean)
+      const response = await savePromptFilterLexiconWords({
+        id: preview.file.id,
+        words,
+      })
+      if (!response.success) {
+        throw new Error(response.message || '词库保存失败')
+      }
+      return response.data.file
+    },
+    onSuccess: async (file) => {
+      await refreshPromptFilterQueries()
+      const response = await previewPromptFilterLexicon({
+        id: file.id,
+        limit: previewMode === 'edit' ? lexiconEditLimit : lexiconPreviewLimit,
+      })
+      if (response.success) {
+        setPreview(response.data)
+        setEditorText(response.data.words.join('\n'))
+      }
+      toast.success('词库词条已保存')
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || '词库保存失败')
+    },
+  })
+
   const rows = lexiconsQuery.data?.data.items ?? []
   const busy =
     props.disabled ||
     uploadMutation.isPending ||
     toggleMutation.isPending ||
-    deleteMutation.isPending
+    deleteMutation.isPending ||
+    previewMutation.isPending ||
+    saveWordsMutation.isPending
 
   return (
     <Card>
@@ -1972,6 +2084,82 @@ function PromptFilterLexiconsPanel(props: { disabled: boolean }) {
           />
         ) : null}
 
+        {previewMutation.isPending && previewMutation.variables ? (
+          <div className='text-muted-foreground rounded-lg border p-4 text-sm'>
+            正在加载「{previewMutation.variables.file.name}」词库内容...
+          </div>
+        ) : null}
+
+        {preview ? (
+          <div className='space-y-3 rounded-lg border p-4'>
+            <div className='flex flex-wrap items-start justify-between gap-3'>
+              <div>
+                <div className='flex flex-wrap items-center gap-2'>
+                  <h4 className='font-medium'>{preview.file.name}</h4>
+                  <Badge variant='outline'>
+                    {promptFilterLexiconSourceLabel(preview.file.source)}
+                  </Badge>
+                  <Badge variant={preview.file.enabled ? 'default' : 'outline'}>
+                    {preview.file.enabled ? '已启用' : '已禁用'}
+                  </Badge>
+                </div>
+                <p className='text-muted-foreground mt-1 text-sm'>
+                  {preview.truncated
+                    ? `当前显示前 ${preview.words.length} 条，共 ${preview.total} 条。`
+                    : `共 ${preview.total} 条词。`}
+                </p>
+              </div>
+              <div className='flex flex-wrap gap-2'>
+                {previewMode === 'preview' ? (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    disabled={busy}
+                    onClick={() =>
+                      previewMutation.mutate({
+                        file: preview.file,
+                        mode: 'edit',
+                      })
+                    }
+                  >
+                    <Pencil data-icon='inline-start' />
+                    <span>编辑全部</span>
+                  </Button>
+                ) : (
+                  <Button
+                    type='button'
+                    size='sm'
+                    disabled={busy}
+                    onClick={() => saveWordsMutation.mutate()}
+                  >
+                    <Save data-icon='inline-start' />
+                    <span>保存词条</span>
+                  </Button>
+                )}
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='sm'
+                  disabled={busy}
+                  onClick={() => {
+                    setPreview(null)
+                    setEditorText('')
+                  }}
+                >
+                  关闭
+                </Button>
+              </div>
+            </div>
+            <Textarea
+              className='min-h-56 font-mono text-xs'
+              value={editorText}
+              readOnly={previewMode !== 'edit'}
+              onChange={(event) => setEditorText(event.target.value)}
+            />
+          </div>
+        ) : null}
+
         {rows.length === 0 ? (
           <div className='grid min-h-32 place-items-center rounded-lg border border-dashed'>
             <div className='text-center'>
@@ -1991,7 +2179,7 @@ function PromptFilterLexiconsPanel(props: { disabled: boolean }) {
                 <TableHead>词条</TableHead>
                 <TableHead>大小</TableHead>
                 <TableHead>权重</TableHead>
-                <TableHead>上传时间</TableHead>
+                <TableHead>更新时间</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>操作</TableHead>
               </TableRow>
@@ -2008,8 +2196,14 @@ function PromptFilterLexiconsPanel(props: { disabled: boolean }) {
                       enabled: nextEnabled,
                     })
                   }
+                  onPreview={() =>
+                    previewMutation.mutate({ file, mode: 'preview' })
+                  }
+                  onEdit={() => previewMutation.mutate({ file, mode: 'edit' })}
                   onDelete={() => {
-                    if (window.confirm(`确认删除词库「${file.name}」吗？`)) {
+                    const actionLabel =
+                      file.source === 'preset' ? '重置预设词库' : '删除词库'
+                    if (window.confirm(`确认${actionLabel}「${file.name}」吗？`)) {
                       deleteMutation.mutate(file.id)
                     }
                   }}
@@ -2027,12 +2221,21 @@ function PromptFilterLexiconRow(props: {
   file: PromptFilterLexiconFile
   disabled: boolean
   onToggle: (enabled: boolean) => void
+  onPreview: () => void
+  onEdit: () => void
   onDelete: () => void
 }) {
+  const canResetOrDelete =
+    props.file.source !== 'preset' || props.file.uploaded_at > 0
   return (
     <TableRow>
       <TableCell>
-        <div className='font-medium'>{props.file.name}</div>
+        <div className='flex flex-wrap items-center gap-2'>
+          <span className='font-medium'>{props.file.name}</span>
+          <Badge variant='outline'>
+            {promptFilterLexiconSourceLabel(props.file.source)}
+          </Badge>
+        </div>
         <div className='text-muted-foreground max-w-64 truncate text-xs'>
           {props.file.original_name}
         </div>
@@ -2060,7 +2263,27 @@ function PromptFilterLexiconRow(props: {
         </Badge>
       </TableCell>
       <TableCell>
-        <div className='flex gap-2'>
+        <div className='flex flex-wrap gap-2'>
+          <Button
+            variant='outline'
+            size='sm'
+            disabled={props.disabled}
+            aria-label={`预览 ${props.file.name}`}
+            onClick={props.onPreview}
+          >
+            <Eye data-icon='inline-start' />
+            <span>查看</span>
+          </Button>
+          <Button
+            variant='outline'
+            size='sm'
+            disabled={props.disabled}
+            aria-label={`编辑 ${props.file.name}`}
+            onClick={props.onEdit}
+          >
+            <Pencil data-icon='inline-start' />
+            <span>修改</span>
+          </Button>
           <Button
             variant='outline'
             size='sm'
@@ -2069,14 +2292,21 @@ function PromptFilterLexiconRow(props: {
           >
             {props.file.enabled ? '关闭' : '开启'}
           </Button>
-          <Button
-            variant='ghost'
-            size='icon-sm'
-            disabled={props.disabled}
-            onClick={props.onDelete}
-          >
-            <Trash2 />
-          </Button>
+          {canResetOrDelete ? (
+            <Button
+              variant='ghost'
+              size='icon-sm'
+              disabled={props.disabled}
+              aria-label={
+                props.file.source === 'preset'
+                  ? `重置 ${props.file.name}`
+                  : `删除 ${props.file.name}`
+              }
+              onClick={props.onDelete}
+            >
+              {props.file.source === 'preset' ? <RefreshCcw /> : <Trash2 />}
+            </Button>
+          ) : null}
         </div>
       </TableCell>
     </TableRow>

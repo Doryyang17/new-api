@@ -25,6 +25,7 @@ import type {
   LogCleanupTask,
   PromptFilterApiResponse,
   PromptFilterLexiconFile,
+  PromptFilterLexiconPreviewData,
   PromptFilterLexiconsData,
   PromptFilterLogsData,
   PromptFilterRulesData,
@@ -174,13 +175,39 @@ export async function updatePromptFilterLexicon(request: {
 }) {
   const res = await api.patch<
     PromptFilterApiResponse<{ file: PromptFilterLexiconFile }>
-  >(`/api/prompt-filter/lexicons/${request.id}`, { enabled: request.enabled })
+  >(`/api/prompt-filter/lexicons/${encodeURIComponent(request.id)}`, {
+    enabled: request.enabled,
+  })
+  return res.data
+}
+
+export async function previewPromptFilterLexicon(request: {
+  id: string
+  limit?: number
+}) {
+  const res = await api.get<
+    PromptFilterApiResponse<PromptFilterLexiconPreviewData>
+  >(`/api/prompt-filter/lexicons/${encodeURIComponent(request.id)}/preview`, {
+    params: { limit: request.limit ?? 200 },
+  })
+  return res.data
+}
+
+export async function savePromptFilterLexiconWords(request: {
+  id: string
+  words: string[]
+}) {
+  const res = await api.put<
+    PromptFilterApiResponse<{ file: PromptFilterLexiconFile }>
+  >(`/api/prompt-filter/lexicons/${encodeURIComponent(request.id)}/words`, {
+    words: request.words,
+  })
   return res.data
 }
 
 export async function deletePromptFilterLexicon(id: string) {
   const res = await api.delete<PromptFilterApiResponse<Record<string, never>>>(
-    `/api/prompt-filter/lexicons/${id}`
+    `/api/prompt-filter/lexicons/${encodeURIComponent(id)}`
   )
   return res.data
 }

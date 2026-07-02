@@ -103,11 +103,19 @@ export type PromptFilterLexiconFile = {
   weight: number
   strict: boolean
   enabled: boolean
+  source?: string
   uploaded_at: number
 }
 
 export type PromptFilterLexiconsData = {
   items: PromptFilterLexiconFile[]
+}
+
+export type PromptFilterLexiconPreviewData = {
+  file: PromptFilterLexiconFile
+  words: string[]
+  total: number
+  truncated: boolean
 }
 
 export type PromptFilterStatusData = {
