@@ -381,7 +381,11 @@ export function UserAuthForm({
       {/* OAuth Providers */}
       <OAuthProviders
         status={status}
-        disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
+        disabled={
+          isLoading ||
+          !turnstileReady ||
+          (requiresLegalConsent && !agreedToLegal)
+        }
         onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
         isWeChatLoading={isWeChatSubmitting}
       />
@@ -455,19 +459,20 @@ export function UserAuthForm({
               {t('Sign in')}
             </Button>
 
-            {/* Turnstile */}
-            {isTurnstileEnabled && (
-              <div className='mt-2'>
-                <Turnstile
-                  siteKey={turnstileSiteKey}
-                  onVerify={handleTurnstileVerify}
-                  onExpire={resetTurnstile}
-                  onError={handleTurnstileError}
-                  resetKey={turnstileResetKey}
-                />
-              </div>
-            )}
           </>
+        )}
+
+        {/* Turnstile */}
+        {isTurnstileEnabled && (
+          <div className='mt-2'>
+            <Turnstile
+              siteKey={turnstileSiteKey}
+              onVerify={handleTurnstileVerify}
+              onExpire={resetTurnstile}
+              onError={handleTurnstileError}
+              resetKey={turnstileResetKey}
+            />
+          </div>
         )}
 
         <LegalConsent

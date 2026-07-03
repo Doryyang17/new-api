@@ -40,6 +40,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import * as z from 'zod'
 
+import { Dialog } from '@/components/dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -1480,8 +1481,21 @@ function PromptFilterRulesPanel(props: PromptFilterRulesPanelProps) {
   const [category, setCategory] = useState('all')
   const [selected, setSelected] = useState<string[]>([])
   const categories = useMemo(() => uniqueCategories(props.rules), [props.rules])
-  const filteredRules = props.rules.filter(
-    (rule) => category === 'all' || rule.category === category
+  const filteredRules = useMemo(
+    () =>
+      props.rules
+        .map((rule, index) => ({ rule, index }))
+        .filter(
+          ({ rule }) => category === 'all' || rule.category === category
+        )
+        .sort((left, right) => {
+          if (left.rule.enabled !== right.rule.enabled) {
+            return left.rule.enabled ? -1 : 1
+          }
+          return left.index - right.index
+        })
+        .map(({ rule }) => rule),
+    [category, props.rules]
   )
   const filteredRuleNames = useMemo(
     () => new Set(filteredRules.map((rule) => rule.name)),
@@ -1627,9 +1641,66 @@ function PromptFilterRulesPanel(props: PromptFilterRulesPanelProps) {
                 <TableCell>{rule.category || '-'}</TableCell>
                 <TableCell>{rule.weight}</TableCell>
                 <TableCell className='max-w-[42rem] whitespace-normal'>
-                  <code className='bg-muted/60 line-clamp-2 rounded px-1.5 py-1 text-xs'>
-                    {rule.pattern}
-                  </code>
+                  <div className='flex min-w-0 items-start gap-2'>
+                    <code className='bg-muted/60 line-clamp-2 min-w-0 flex-1 rounded px-1.5 py-1 text-xs'>
+                      {rule.pattern}
+                    </code>
+                    <Dialog
+                      title='正则完整预览'
+                      description='查看该 Prompt 检查规则的完整正则表达式。'
+                      trigger={
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='sm'
+                          className='shrink-0'
+                          aria-label={`查看 ${rule.name} 完整正则`}
+                        >
+                          <Eye data-icon='inline-start' />
+                          <span>查看</span>
+                        </Button>
+                      }
+                      contentClassName='sm:max-w-3xl'
+                      bodyClassName='space-y-4'
+                    >
+                      <div className='flex flex-wrap items-center gap-2'>
+                        <Badge variant='secondary'>{t('Built-in')}</Badge>
+                        {rule.strict ? (
+                          <Badge variant='destructive'>{t('Strict Rule')}</Badge>
+                        ) : null}
+                        <Badge variant={rule.enabled ? 'default' : 'outline'}>
+                          {rule.enabled ? t('Enabled') : t('Disabled')}
+                        </Badge>
+                      </div>
+                      <div className='grid gap-3 sm:grid-cols-3'>
+                        <div>
+                          <div className='text-muted-foreground text-xs'>
+                            {t('Rule Name')}
+                          </div>
+                          <div className='font-mono text-sm font-medium break-all'>
+                            {rule.name}
+                          </div>
+                        </div>
+                        <div>
+                          <div className='text-muted-foreground text-xs'>
+                            {t('Category')}
+                          </div>
+                          <div className='text-sm'>{rule.category || '-'}</div>
+                        </div>
+                        <div>
+                          <div className='text-muted-foreground text-xs'>
+                            {t('Weight')}
+                          </div>
+                          <div className='text-sm'>{rule.weight}</div>
+                        </div>
+                      </div>
+                      <Textarea
+                        readOnly
+                        value={rule.pattern}
+                        className='min-h-52 resize-y font-mono text-xs'
+                      />
+                    </Dialog>
+                  </div>
                 </TableCell>
                 <TableCell>
                   <Button

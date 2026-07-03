@@ -92,8 +92,9 @@ function getDefaultEndpointForChannel(channel: UpstreamChannel): string {
 
 function getBillingCategory(ratioType: string): 'price' | 'ratio' | 'tiered' {
   if (ratioType === 'model_price') return 'price'
-  if (ratioType === 'billing_mode' || ratioType === 'billing_expr')
+  if (ratioType === 'billing_mode' || ratioType === 'billing_expr') {
     return 'tiered'
+  }
   return 'ratio'
 }
 
@@ -172,7 +173,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       let mutated = false
       const next = { ...prev }
       for (const channel of channels) {
-        if (!next[channel.id]) {
+        if (!(channel.id in next)) {
           next[channel.id] = getDefaultEndpointForChannel(channel)
           mutated = true
         }
@@ -263,7 +264,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       id: ch.id,
       name: ch.name,
       base_url: ch.base_url,
-      endpoint: channelEndpoints[ch.id] || DEFAULT_ENDPOINT,
+      endpoint: channelEndpoints[ch.id] ?? DEFAULT_ENDPOINT,
     }))
 
     fetchMutation.mutate({ upstreams, timeout: 10 })
@@ -292,7 +293,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       const category = getBillingCategory(finalType)
 
       setResolutions((prev) => {
-        const newModelRes = { ...(prev[model] || {}) }
+        const newModelRes = { ...prev[model] }
 
         // Clear conflicting categories
         Object.keys(newModelRes).forEach((rt) => {
@@ -370,8 +371,9 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       currentRatios.ImageRatio[model] !== undefined ||
       currentRatios.AudioRatio[model] !== undefined ||
       currentRatios.AudioCompletionRatio[model] !== undefined
-    )
+    ) {
       return 'ratio'
+    }
     return null
   }
 

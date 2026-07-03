@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ColumnDef, type RowSelectionState } from '@tanstack/react-table'
+import type { ColumnDef, RowSelectionState } from '@tanstack/react-table'
 import { Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import {
   DataTablePagination,
@@ -212,7 +213,7 @@ export function ChannelSelectorDialog({
         cell: ({ row }) => {
           const channel = row.original
           const currentEndpoint =
-            channelEndpoints[channel.id] || DEFAULT_ENDPOINT
+            channelEndpoints[channel.id] ?? DEFAULT_ENDPOINT
           const endpointType = getEndpointType(currentEndpoint)
 
           const handleTypeChange = (value: string) => {
@@ -226,12 +227,10 @@ export function ChannelSelectorDialog({
           return (
             <div className='flex items-center gap-2'>
               <Select
-                items={[
-                  ...ENDPOINT_OPTIONS.map((option) => ({
-                    value: option.value,
-                    label: option.label,
-                  })),
-                ]}
+                items={ENDPOINT_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
                 value={endpointType}
                 onValueChange={(v) => v !== null && handleTypeChange(v)}
               >
@@ -299,6 +298,16 @@ export function ChannelSelectorDialog({
 
   const handleConfirm = () => {
     const selectedRows = table.getSelectedRowModel().rows
+    const emptyCustomEndpoint = selectedRows.find((row) => {
+      const endpoint = channelEndpoints[row.original.id] ?? DEFAULT_ENDPOINT
+      return endpoint.trim() === ''
+    })
+
+    if (emptyCustomEndpoint) {
+      toast.warning('请填写自定义同步端点')
+      return
+    }
+
     const selectedIds = selectedRows.map((row) => row.original.id)
     onSelectedChannelIdsChange(selectedIds)
     onOpenChange(false)

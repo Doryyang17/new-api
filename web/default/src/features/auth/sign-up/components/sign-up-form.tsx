@@ -463,7 +463,11 @@ export function SignUpForm({
         {oauthRegisterEnabled && (
           <OAuthProviders
             status={status}
-            disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
+            disabled={
+              isLoading ||
+              !turnstileReady ||
+              (requiresLegalConsent && !agreedToLegal)
+            }
             onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
             isWeChatLoading={isWeChatSubmitting}
             className='pt-2'
