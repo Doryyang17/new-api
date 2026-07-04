@@ -3,6 +3,7 @@ package middleware
 import (
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -12,6 +13,8 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
+
+const promptFilterHistoryRecoveryMaxBodyBytes = 16 << 20
 
 func PromptComplianceCheck(endpoint string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -52,11 +55,74 @@ func PromptComplianceCheck(endpoint string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		if recoverPromptFilterBlockedHistory(c, storage, checkEndpoint, verdict) {
+			c.Next()
+			return
+		}
 
+		recordPromptFilterBlockedMessage(c, storage, checkEndpoint, verdict)
 		recordPromptFilterReject(c, checkEndpoint, verdict)
 		writePromptFilterResponse(c, verdict)
 		c.Abort()
 	}
+}
+
+func recoverPromptFilterBlockedHistory(c *gin.Context, storage common.BodyStorage, endpoint string, verdict service.PromptFilterVerdict) bool {
+	if c == nil || c.Request == nil || storage == nil {
+		return false
+	}
+	contentType := c.Request.Header.Get("Content-Type")
+	if !service.PromptFilterBlockedHistoryRecoverySupported(contentType, endpoint) {
+		return false
+	}
+	if storage.Size() > promptFilterHistoryRecoveryMaxBodyBytes {
+		return false
+	}
+	body, err := storage.Bytes()
+	if err != nil {
+		return false
+	}
+
+	userID := c.GetInt("id")
+	tokenID := c.GetInt("token_id")
+	recovery, err := service.BuildPromptFilterBlockedHistoryRecovery(body, contentType, endpoint, userID, tokenID, verdict.Matched)
+	if err != nil || !recovery.Supported || strings.TrimSpace(recovery.CurrentUserText) == "" {
+		return false
+	}
+
+	if recovery.Removed == 0 || len(recovery.Body) == 0 {
+		return false
+	}
+
+	sanitizedVerdict := service.InspectPromptRequestBodyWithContext(c.Request.Context(), recovery.Body, contentType, endpoint)
+	if sanitizedVerdict.Action == service.PromptFilterActionBlock {
+		return false
+	}
+	if err := replacePromptFilterBody(c, recovery.Body, storage); err != nil {
+		return false
+	}
+	c.Header("X-Prompt-Filter-History-Sanitized", strconv.Itoa(recovery.Removed))
+	return true
+}
+
+func recordPromptFilterBlockedMessage(c *gin.Context, storage common.BodyStorage, endpoint string, verdict service.PromptFilterVerdict) {
+	if c == nil || c.Request == nil || storage == nil {
+		service.RecordPromptFilterBlockedMessage(0, 0, verdict.FullText, verdict.Matched)
+		return
+	}
+	userID := c.GetInt("id")
+	tokenID := c.GetInt("token_id")
+	contentType := c.Request.Header.Get("Content-Type")
+	if !service.PromptFilterBlockedHistoryRecoverySupported(contentType, endpoint) || storage.Size() > promptFilterHistoryRecoveryMaxBodyBytes {
+		service.RecordPromptFilterBlockedMessage(userID, tokenID, verdict.FullText, verdict.Matched)
+		return
+	}
+	body, err := storage.Bytes()
+	if err != nil {
+		service.RecordPromptFilterBlockedMessage(userID, tokenID, verdict.FullText, verdict.Matched)
+		return
+	}
+	service.RecordPromptFilterBlockedRequestMessages(body, contentType, endpoint, userID, tokenID, verdict.FullText, verdict.Matched)
 }
 
 func resetPromptFilterBody(c *gin.Context, storage common.BodyStorage) {
@@ -66,6 +132,22 @@ func resetPromptFilterBody(c *gin.Context, storage common.BodyStorage) {
 	if _, err := storage.Seek(0, io.SeekStart); err == nil {
 		c.Request.Body = io.NopCloser(storage)
 	}
+}
+
+func replacePromptFilterBody(c *gin.Context, body []byte, previous common.BodyStorage) error {
+	storage, err := common.CreateBodyStorage(body)
+	if err != nil {
+		return err
+	}
+	c.Set(common.KeyBodyStorage, storage)
+	c.Set(common.KeyRequestBody, body)
+	c.Request.Body = io.NopCloser(storage)
+	c.Request.ContentLength = int64(len(body))
+	c.Request.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	if previous != nil && previous != storage {
+		_ = previous.Close()
+	}
+	return nil
 }
 
 func recordPromptFilterReject(c *gin.Context, endpoint string, verdict service.PromptFilterVerdict) {

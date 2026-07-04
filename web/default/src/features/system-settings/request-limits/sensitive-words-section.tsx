@@ -83,6 +83,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { formatTimestampToDate } from '@/lib/format'
 
 import {
   clearPromptFilterLogs,
@@ -1374,6 +1375,12 @@ function PromptFilterLogsPanel() {
             <TableHeader>
               <TableRow>
                 <TableHead>{t('Action')}</TableHead>
+                <TableHead className='whitespace-nowrap'>
+                  {t('Time')}
+                </TableHead>
+                <TableHead className='whitespace-nowrap'>
+                  {t('Trigger User')}
+                </TableHead>
                 <TableHead>{t('Source')}</TableHead>
                 <TableHead>{t('Endpoint')}</TableHead>
                 <TableHead>{t('Model')}</TableHead>
@@ -1435,6 +1442,12 @@ function PromptFilterLogRow(props: { log: PromptFilterLog }) {
           {t(actionLabel(props.log.action))}
         </Badge>
       </TableCell>
+      <TableCell className='font-mono text-xs whitespace-nowrap'>
+        {formatTimestampToDate(props.log.created_at)}
+      </TableCell>
+      <TableCell className='max-w-40 truncate'>
+        {promptFilterLogUserLabel(props.log)}
+      </TableCell>
       <TableCell>{t(sourceLabel(props.log.source))}</TableCell>
       <TableCell className='max-w-48 truncate'>{props.log.endpoint}</TableCell>
       <TableCell className='max-w-40 truncate'>
@@ -1466,6 +1479,19 @@ function PromptFilterLogRow(props: { log: PromptFilterLog }) {
       </TableCell>
     </TableRow>
   )
+}
+
+function promptFilterLogUserLabel(log: PromptFilterLog) {
+  if (log.username && log.user_id > 0) {
+    return `${log.username} (#${log.user_id})`
+  }
+  if (log.username) {
+    return log.username
+  }
+  if (log.user_id > 0) {
+    return `#${log.user_id}`
+  }
+  return '-'
 }
 
 type PromptFilterRulesPanelProps = {

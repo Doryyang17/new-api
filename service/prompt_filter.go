@@ -44,6 +44,7 @@ type PromptFilterMatch struct {
 	Weight   int    `json:"weight"`
 	Category string `json:"category,omitempty"`
 	Strict   bool   `json:"strict,omitempty"`
+	Term     string `json:"-"`
 }
 
 type PromptFilterVerdict struct {

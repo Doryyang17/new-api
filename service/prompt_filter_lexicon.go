@@ -399,6 +399,9 @@ func (m *promptFilterKeywordMatcher) MatchesByKey(text string) map[string]Prompt
 			}
 			node = next
 			for _, keyword := range node.matches {
+				if !promptFilterKeywordBoundaryAllowed(runes, i, j+1, keyword.word) {
+					continue
+				}
 				if _, ok := seen[keyword.key]; ok {
 					continue
 				}
@@ -408,11 +411,33 @@ func (m *promptFilterKeywordMatcher) MatchesByKey(text string) map[string]Prompt
 					Weight:   keyword.weight,
 					Category: keyword.category,
 					Strict:   keyword.strict,
+					Term:     keyword.word,
 				}
 			}
 		}
 	}
 	return matches
+}
+
+func promptFilterKeywordBoundaryAllowed(text []rune, start int, end int, word string) bool {
+	if word == "" || start < 0 || end > len(text) || start >= end {
+		return false
+	}
+	wordRunes := []rune(word)
+	if len(wordRunes) == 0 {
+		return false
+	}
+	if promptFilterASCIIWordRune(wordRunes[0]) && start > 0 && promptFilterASCIIWordRune(text[start-1]) {
+		return false
+	}
+	if promptFilterASCIIWordRune(wordRunes[len(wordRunes)-1]) && end < len(text) && promptFilterASCIIWordRune(text[end]) {
+		return false
+	}
+	return true
+}
+
+func promptFilterASCIIWordRune(r rune) bool {
+	return r == '_' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
 }
 
 func readPromptFilterLexiconBytes(reader io.Reader) ([]byte, error) {

@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/http/httptest"
@@ -193,6 +194,83 @@ func TestInspectPromptTextBlocksConfiguredSensitiveWord(t *testing.T) {
 	assert.NotContains(t, verdict.Matched[0].Name, "customer-secret-keyword")
 }
 
+func TestPromptFilterRecoveryCandidatesAfterClaudeDeferredTools(t *testing.T) {
+	withPromptFilterSettings(t, []string{"这是weijin测试专用"})
+	oldRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = oldRedisEnabled
+	})
+	userID := 92001
+	tokenID := 92002
+
+	text := strings.Repeat("context ", 90) +
+		`你好！有什么我可以帮你的吗？ The following deferred tools are now available via ToolSearch. Their schemas are NOT loaded. ` +
+		`The user is greeting me in Chinese. 你好！有什么我可以帮你的吗？ 这是weijin测试专用是什么 你可以帮我做什么 ` +
+		`x-anthropic-billing-header: cc_version=2.1.198; cc_entrypoint=sdk-cli; You are a Claude agent, built on Anthropic's Claude Agent SDK.`
+	verdict := InspectPromptText(text)
+	require.Equal(t, PromptFilterActionBlock, verdict.Action)
+
+	candidates := promptFilterBlockedMessageRecordCandidates(text, verdict.Matched)
+	require.Contains(t, candidates, "这是weijin测试专用是什么")
+	RecordPromptFilterBlockedMessage(userID, tokenID, candidates[0], verdict.Matched)
+	blockedTexts := promptFilterBlockedTextsForRecovery(userID, tokenID)
+	require.Contains(t, blockedTexts, promptFilterNormalizeForScan("这是weijin测试专用是什么"))
+	require.True(t, promptFilterFlattenedTextHasRecoverableTrailingContent(text, blockedTexts))
+
+	sanitized, changed := promptFilterSanitizeTextByBlockedHistory(text, blockedTexts, false, true, promptFilterBlockedTextRemovalEmbeddedAfterWhitespace, 1)
+	require.True(t, changed)
+	assert.NotContains(t, sanitized, "这是weijin测试专用")
+	assert.Contains(t, sanitized, "你可以帮我做什么")
+	newVerdict := InspectPromptText(sanitized)
+	require.NotEqual(t, PromptFilterActionBlock, newVerdict.Action)
+
+	textData, err := common.Marshal(text)
+	require.NoError(t, err)
+	body := []byte(fmt.Sprintf(`{"model":"claude","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":%s}]}]}`, textData))
+	var root map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(body, &root))
+	var messages []json.RawMessage
+	require.NoError(t, common.Unmarshal(root["messages"], &messages))
+	_, extractedText, ok := promptFilterComparableUserMessageText(messages[0])
+	require.True(t, ok)
+	require.True(t, promptFilterLooksLikeAgentFlattenedContext(extractedText))
+	require.True(t, promptFilterRawMessagesLookLikeAgentFlattenedContext(messages))
+	extractedBlockedTexts := promptFilterBlockedTextsForRecovery(userID, tokenID)
+	require.Contains(t, extractedBlockedTexts, promptFilterNormalizeForScan("这是weijin测试专用是什么"))
+	require.True(t, promptFilterFlattenedTextHasRecoverableTrailingContent(extractedText, extractedBlockedTexts))
+	require.True(t, promptFilterFlattenedTextHasRecoverableTrailingContent(extractedText, blockedTexts))
+	rewrittenMessage, rewrittenText, changed := promptFilterSanitizeFlattenedCurrentUserMessage(messages[0], blockedTexts, true, false, 1)
+	require.True(t, changed)
+	require.NotEqual(t, string(messages[0]), string(rewrittenMessage))
+	require.NotContains(t, rewrittenText, "这是weijin测试专用")
+	require.Contains(t, rewrittenText, "你可以帮我做什么")
+	_, rewrittenExtractedText, extractedChanged := promptFilterSanitizeFlattenedCurrentUserMessage(messages[0], extractedBlockedTexts, true, false, 1)
+	require.True(t, extractedChanged)
+	require.NotContains(t, rewrittenExtractedText, "这是weijin测试专用")
+	termlessMatches := []PromptFilterMatch{{Name: "sensitive_word", Category: "sensitive_word", Strict: true, Weight: 100}}
+	termlessCandidates := promptFilterBlockedMessageRecordCandidates(extractedText, termlessMatches)
+	require.Contains(t, termlessCandidates, "这是weijin测试专用是什么")
+	termlessUserID := 92003
+	termlessTokenID := 92004
+	RecordPromptFilterBlockedMessage(termlessUserID, termlessTokenID, termlessCandidates[0], termlessMatches)
+	termlessBlockedTexts := promptFilterBlockedTextsForRecovery(termlessUserID, termlessTokenID)
+	require.Contains(t, termlessBlockedTexts, promptFilterNormalizeForScan("这是weijin测试专用是什么"))
+	termlessRecovery, err := sanitizePromptFilterRawMessageArray(root, "messages", messages, termlessUserID, termlessTokenID, true, termlessMatches)
+	require.NoError(t, err)
+	require.Equal(t, 1, termlessRecovery.Removed)
+
+	arrayRecovery, err := sanitizePromptFilterRawMessageArray(root, "messages", messages, userID, tokenID, true, verdict.Matched)
+	require.NoError(t, err)
+	require.Equal(t, 1, arrayRecovery.Removed)
+	require.NotContains(t, string(arrayRecovery.Body), "这是weijin测试专用")
+	recovery, err := BuildPromptFilterBlockedHistoryRecovery(body, "application/json", "messages", userID, tokenID, verdict.Matched)
+	require.NoError(t, err)
+	require.Equal(t, 1, recovery.Removed)
+	require.NotContains(t, string(recovery.Body), "这是weijin测试专用")
+	require.Contains(t, string(recovery.Body), "你可以帮我做什么")
+}
+
 func TestParsePromptFilterLexiconWordsSupportsTextAndJSON(t *testing.T) {
 	textWords, err := ParsePromptFilterLexiconWords("local.txt", []byte("\ufeffalpha\n# comment\n\nbeta\nalpha\n"))
 	require.NoError(t, err)
@@ -235,6 +313,61 @@ func TestInspectPromptTextBlocksEnabledLexiconFile(t *testing.T) {
 	require.Equal(t, PromptFilterActionBlock, verdict.Action)
 	require.NotEmpty(t, verdict.Matched)
 	assert.Equal(t, "lexicon:验收词库", verdict.Matched[0].Name)
+}
+
+func TestInspectPromptTextDoesNotMatchAsciiLexiconInsideLongerWords(t *testing.T) {
+	withPromptFilterSettings(t, nil)
+	lexiconDir := t.TempDir()
+	t.Setenv(promptFilterLexiconDirEnv, lexiconDir)
+	require.NoError(t, os.WriteFile(filepath.Join(lexiconDir, "ascii.txt"), []byte("anal\nsm\nsb\n"), 0644))
+	files := []system_setting.PromptFilterLexiconFile{
+		{
+			ID:           "ascii",
+			Name:         "ASCII 词库",
+			OriginalName: "ascii.txt",
+			StoredName:   "ascii.txt",
+			SHA256:       "test",
+			Size:         11,
+			WordCount:    3,
+			Category:     "acceptance",
+			Weight:       100,
+			Strict:       true,
+			Enabled:      true,
+			UploadedAt:   1,
+		},
+	}
+	data, err := common.Marshal(files)
+	require.NoError(t, err)
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"prompt_filter_setting.lexicon_files": string(data),
+	}))
+
+	verdict := InspectPromptText("analysis transmit usb connector")
+	require.Equal(t, PromptFilterActionAllow, verdict.Action)
+	assert.Empty(t, verdict.Matched)
+
+	verdict = InspectPromptText("standalone anal token")
+	require.Equal(t, PromptFilterActionBlock, verdict.Action)
+	require.NotEmpty(t, verdict.Matched)
+	assert.Equal(t, "lexicon:ASCII 词库", verdict.Matched[0].Name)
+}
+
+func TestRecordPromptFilterBlockedMessageTracksCompleteMessageOnly(t *testing.T) {
+	withPromptFilterSettings(t, []string{"这是weijin测试专用"})
+	oldRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = oldRedisEnabled
+	})
+
+	userID := 90321
+	tokenID := 90322
+	RecordPromptFilterBlockedMessage(userID, tokenID, "context 这是weijin测试专用是什么", []PromptFilterMatch{{Name: "lexicon:色情词库"}})
+
+	assert.True(t, PromptFilterBlockedMessageExists(userID, tokenID, "context 这是weijin测试专用是什么"))
+	assert.False(t, PromptFilterBlockedMessageExists(userID, tokenID, "这是weijin测试专用"))
+	assert.False(t, PromptFilterBlockedMessageExists(userID, tokenID, "这是weijin测试专用是什么"))
+	assert.Contains(t, PromptFilterBlockedMessages(userID, tokenID), "context 这是weijin测试专用是什么")
 }
 
 func TestPromptFilterPresetLexiconsAreVisibleDisabledAndPreviewable(t *testing.T) {
