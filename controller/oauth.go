@@ -129,6 +129,10 @@ func HandleOAuth(c *gin.Context) {
 			common.ApiErrorMsg(c, registrationCodeInvalidMessage)
 			return
 		}
+		if errors.Is(err, model.ErrEmailAlreadyTaken) {
+			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
+			return
+		}
 		switch e := err.(type) {
 		case *OAuthUserDeletedError:
 			common.ApiErrorI18n(c, i18n.MsgOAuthUserDeleted)
@@ -138,6 +142,8 @@ func HandleOAuth(c *gin.Context) {
 			storeOAuthPendingRegistration(c, session, providerName, provider, oauthUser)
 		case *OAuthRegistrationRiskBlockedError:
 			respondRegistrationRiskBlocked(c, e.RetryAfter)
+		case *OAuthEmailAlreadyTakenError:
+			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
 		default:
 			common.ApiError(c, err)
 		}
@@ -327,7 +333,13 @@ func createOAuthUserForNewUser(
 		user.DisplayName = provider.GetName() + " User"
 	}
 	if oauthUser.Email != "" {
-		user.Email = oauthUser.Email
+		user.Email = model.NormalizeEmail(oauthUser.Email)
+		if err := model.EnsureEmailAvailable(user.Email, 0); err != nil {
+			if errors.Is(err, model.ErrEmailAlreadyTaken) {
+				return nil, &OAuthEmailAlreadyTakenError{}
+			}
+			return nil, err
+		}
 	}
 	user.Role = common.RoleCommonUser
 	user.Status = common.UserStatusEnabled
@@ -445,6 +457,12 @@ type OAuthRegistrationRiskBlockedError struct {
 
 func (e *OAuthRegistrationRiskBlockedError) Error() string {
 	return "registration risk blocked"
+}
+
+type OAuthEmailAlreadyTakenError struct{}
+
+func (e *OAuthEmailAlreadyTakenError) Error() string {
+	return "email is already in use"
 }
 
 // handleOAuthError handles OAuth errors and returns translated message
