@@ -112,6 +112,7 @@ import type {
   PromptFilterCustomRule,
   PromptFilterLexiconFile,
   PromptFilterLexiconPreviewData,
+  PromptFilterMatch,
   PromptFilterLog,
   PromptFilterMode,
   PromptFilterRule,
@@ -1186,11 +1187,12 @@ function VerdictCard(props: { verdict: PromptFilterVerdict }) {
           </pre>
         ) : null}
         {props.verdict.matched.length > 0 ? (
-          <div className='flex flex-wrap gap-1'>
+          <div className='space-y-1.5'>
             {props.verdict.matched.map((match) => (
-              <Badge key={`${match.name}-${match.weight}`} variant='outline'>
-                {match.name} · {match.weight}
-              </Badge>
+              <PromptFilterMatchItem
+                key={`${match.name}-${match.term ?? ''}-${match.weight}`}
+                match={match}
+              />
             ))}
           </div>
         ) : null}
@@ -1375,9 +1377,7 @@ function PromptFilterLogsPanel() {
             <TableHeader>
               <TableRow>
                 <TableHead>{t('Action')}</TableHead>
-                <TableHead className='whitespace-nowrap'>
-                  {t('Time')}
-                </TableHead>
+                <TableHead className='whitespace-nowrap'>{t('Time')}</TableHead>
                 <TableHead className='whitespace-nowrap'>
                   {t('Trigger User')}
                 </TableHead>
@@ -1386,6 +1386,7 @@ function PromptFilterLogsPanel() {
                 <TableHead>{t('Model')}</TableHead>
                 <TableHead>{t('API Key')}</TableHead>
                 <TableHead>{t('Score')}</TableHead>
+                <TableHead className='min-w-56'>命中项</TableHead>
                 <TableHead className='whitespace-nowrap'>
                   {t('Status Code')}
                 </TableHead>
@@ -1459,6 +1460,9 @@ function PromptFilterLogRow(props: { log: PromptFilterLog }) {
       <TableCell>
         {props.log.score}/{props.log.threshold}
       </TableCell>
+      <TableCell className='max-w-72 whitespace-normal'>
+        <PromptFilterMatchesCell matches={props.log.matched} />
+      </TableCell>
       <TableCell className='font-mono text-xs whitespace-nowrap'>
         {props.log.status_code > 0 ? props.log.status_code : '-'}
       </TableCell>
@@ -1467,18 +1471,87 @@ function PromptFilterLogRow(props: { log: PromptFilterLog }) {
       </TableCell>
       <TableCell className='max-w-[34rem] whitespace-normal'>
         <div className='line-clamp-2'>{props.log.text_preview || '-'}</div>
-        {props.log.matched.length > 0 ? (
-          <div className='mt-1 flex flex-wrap gap-1'>
-            {props.log.matched.slice(0, 3).map((match) => (
-              <Badge key={match.name} variant='secondary'>
-                {match.name}
-              </Badge>
-            ))}
-          </div>
-        ) : null}
       </TableCell>
     </TableRow>
   )
+}
+
+function PromptFilterMatchesCell(props: { matches: PromptFilterMatch[] }) {
+  if (props.matches.length === 0) {
+    return <span className='text-muted-foreground'>-</span>
+  }
+
+  const visibleMatches = props.matches.slice(0, 3)
+  const remainingCount = props.matches.length - visibleMatches.length
+
+  return (
+    <div className='space-y-1.5'>
+      {visibleMatches.map((match) => (
+        <PromptFilterMatchItem
+          key={`${match.name}-${match.term ?? ''}-${match.weight}`}
+          match={match}
+        />
+      ))}
+      {remainingCount > 0 ? (
+        <div className='text-muted-foreground text-xs'>
+          还有 {remainingCount} 条命中项
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function PromptFilterMatchItem(props: { match: PromptFilterMatch }) {
+  const term = promptFilterMatchTerm(props.match)
+  const title = promptFilterMatchTitle(props.match)
+  return (
+    <div className='min-w-0 space-y-1' title={title}>
+      <div className='flex min-w-0 flex-wrap items-center gap-1'>
+        {term ? (
+          <Badge
+            variant={props.match.strict ? 'destructive' : 'secondary'}
+            className='max-w-44 justify-start truncate font-mono'
+          >
+            <span className='truncate'>{term}</span>
+          </Badge>
+        ) : (
+          <Badge variant='outline' className='text-muted-foreground'>
+            未记录关键词
+          </Badge>
+        )}
+        {props.match.strict ? <Badge variant='secondary'>严格</Badge> : null}
+      </div>
+      <div className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]'>
+        <span className='min-w-0 truncate font-mono'>
+          {props.match.name || 'unknown_rule'}
+        </span>
+        <span>权重 {props.match.weight}</span>
+        {props.match.category ? <span>{props.match.category}</span> : null}
+      </div>
+    </div>
+  )
+}
+
+function promptFilterMatchTerm(match: PromptFilterMatch) {
+  return (match.term ?? '').trim()
+}
+
+function promptFilterMatchTitle(match: PromptFilterMatch) {
+  const parts = [`规则: ${match.name || 'unknown_rule'}`]
+  const term = promptFilterMatchTerm(match)
+  if (term) {
+    parts.push(`关键词: ${term}`)
+  } else {
+    parts.push('关键词: 历史日志未记录')
+  }
+  parts.push(`权重: ${match.weight}`)
+  if (match.category) {
+    parts.push(`分类: ${match.category}`)
+  }
+  if (match.strict) {
+    parts.push('严格命中')
+  }
+  return parts.join('\n')
 }
 
 function promptFilterLogUserLabel(log: PromptFilterLog) {
@@ -1511,9 +1584,7 @@ function PromptFilterRulesPanel(props: PromptFilterRulesPanelProps) {
     () =>
       props.rules
         .map((rule, index) => ({ rule, index }))
-        .filter(
-          ({ rule }) => category === 'all' || rule.category === category
-        )
+        .filter(({ rule }) => category === 'all' || rule.category === category)
         .sort((left, right) => {
           if (left.rule.enabled !== right.rule.enabled) {
             return left.rule.enabled ? -1 : 1
@@ -1692,7 +1763,9 @@ function PromptFilterRulesPanel(props: PromptFilterRulesPanelProps) {
                       <div className='flex flex-wrap items-center gap-2'>
                         <Badge variant='secondary'>{t('Built-in')}</Badge>
                         {rule.strict ? (
-                          <Badge variant='destructive'>{t('Strict Rule')}</Badge>
+                          <Badge variant='destructive'>
+                            {t('Strict Rule')}
+                          </Badge>
                         ) : null}
                         <Badge variant={rule.enabled ? 'default' : 'outline'}>
                           {rule.enabled ? t('Enabled') : t('Disabled')}
@@ -1742,7 +1815,6 @@ function PromptFilterRulesPanel(props: PromptFilterRulesPanelProps) {
             ))}
           </TableBody>
         </Table>
-
       </CardContent>
     </Card>
   )
@@ -1754,7 +1826,9 @@ type PromptFilterCustomRulesPanelProps = {
   onSaveOption: (key: string, value: string) => Promise<unknown>
 }
 
-function PromptFilterCustomRulesPanel(props: PromptFilterCustomRulesPanelProps) {
+function PromptFilterCustomRulesPanel(
+  props: PromptFilterCustomRulesPanelProps
+) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [customDraft, setCustomDraft] = useState<PromptFilterCustomRule>({
@@ -2026,8 +2100,9 @@ function PromptFilterLexiconsPanel(props: { disabled: boolean }) {
     },
   })
 
-  const [preview, setPreview] =
-    useState<PromptFilterLexiconPreviewData | null>(null)
+  const [preview, setPreview] = useState<PromptFilterLexiconPreviewData | null>(
+    null
+  )
   const [previewMode, setPreviewMode] = useState<'preview' | 'edit'>('preview')
   const [editorText, setEditorText] = useState('')
 
@@ -2038,8 +2113,7 @@ function PromptFilterLexiconsPanel(props: { disabled: boolean }) {
     }) => {
       const response = await previewPromptFilterLexicon({
         id: request.file.id,
-        limit:
-          request.mode === 'edit' ? lexiconEditLimit : lexiconPreviewLimit,
+        limit: request.mode === 'edit' ? lexiconEditLimit : lexiconPreviewLimit,
       })
       if (!response.success) {
         throw new Error(response.message || '词库预览失败')
@@ -2105,7 +2179,8 @@ function PromptFilterLexiconsPanel(props: { disabled: boolean }) {
       <CardHeader>
         <CardTitle>词库文件</CardTitle>
         <CardDescription>
-          上传 txt 或 JSON 词库文件；txt 按一行一个词解析，JSON 兼容 words 数组。
+          上传 txt 或 JSON 词库文件；txt 按一行一个词解析，JSON 兼容 words
+          数组。
         </CardDescription>
         <CardAction>
           <Button
@@ -2151,7 +2226,11 @@ function PromptFilterLexiconsPanel(props: { disabled: boolean }) {
             onChange={(event) => setWeight(Number(event.target.value))}
           />
           <label className='flex items-center gap-2 rounded-md border px-3 py-2 text-sm'>
-            <Switch checked={strict} disabled={busy} onCheckedChange={setStrict} />
+            <Switch
+              checked={strict}
+              disabled={busy}
+              onCheckedChange={setStrict}
+            />
             强规则
           </label>
           <label className='flex items-center gap-2 rounded-md border px-3 py-2 text-sm'>
@@ -2300,7 +2379,9 @@ function PromptFilterLexiconsPanel(props: { disabled: boolean }) {
                   onDelete={() => {
                     const actionLabel =
                       file.source === 'preset' ? '重置预设词库' : '删除词库'
-                    if (window.confirm(`确认${actionLabel}「${file.name}」吗？`)) {
+                    if (
+                      window.confirm(`确认${actionLabel}「${file.name}」吗？`)
+                    ) {
                       deleteMutation.mutate(file.id)
                     }
                   }}

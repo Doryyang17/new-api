@@ -1233,12 +1233,13 @@ func promptFilterTextMatchesConfiguredBlock(text string) bool {
 		matchesByName[key] = match
 	}
 	for _, pattern := range patterns {
-		if pattern.re.FindStringIndex(scanText) != nil {
+		if term, ok := promptFilterPatternMatchTerm(pattern.re, scanText); ok {
 			matchesByName[pattern.name] = PromptFilterMatch{
 				Name:     pattern.name,
 				Weight:   pattern.weight,
 				Category: pattern.category,
 				Strict:   pattern.strict,
+				Term:     term,
 			}
 		}
 	}

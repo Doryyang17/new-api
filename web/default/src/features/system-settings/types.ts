@@ -46,6 +46,7 @@ export type PromptFilterMatch = {
   weight: number
   category?: string
   strict?: boolean
+  term?: string
 }
 
 export type PromptFilterVerdict = {

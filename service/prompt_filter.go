@@ -37,6 +37,7 @@ const (
 	defaultPromptFilterMaxTextLength   = system_setting.DefaultPromptFilterMaxTextLength
 	defaultPromptFilterHeadScanLength  = 64 * 1024
 	defaultPromptFilterTailScanLength  = 16 * 1024
+	promptFilterMatchTermMaxRunes      = 200
 )
 
 type PromptFilterMatch struct {
@@ -44,7 +45,7 @@ type PromptFilterMatch struct {
 	Weight   int    `json:"weight"`
 	Category string `json:"category,omitempty"`
 	Strict   bool   `json:"strict,omitempty"`
-	Term     string `json:"-"`
+	Term     string `json:"term,omitempty"`
 }
 
 type PromptFilterVerdict struct {
@@ -254,12 +255,13 @@ func inspectPromptText(ctx context.Context, text string, forceEnabled bool) Prom
 		matchesByName[key] = match
 	}
 	for _, pattern := range patterns {
-		if pattern.re.FindStringIndex(scanText) != nil {
+		if term, ok := promptFilterPatternMatchTerm(pattern.re, scanText); ok {
 			matchesByName[pattern.name] = PromptFilterMatch{
 				Name:     pattern.name,
 				Weight:   pattern.weight,
 				Category: pattern.category,
 				Strict:   pattern.strict,
+				Term:     term,
 			}
 		}
 	}
@@ -1438,15 +1440,6 @@ func RecordPromptFilterRejectLog(c *gin.Context, endpoint string, verdict Prompt
 	if c.GetInt("id") == 0 && c.GetInt("token_id") == 0 {
 		return
 	}
-	matches := make([]map[string]interface{}, 0, len(verdict.Matched))
-	for _, match := range verdict.Matched {
-		matches = append(matches, map[string]interface{}{
-			"name":     match.Name,
-			"weight":   match.Weight,
-			"category": match.Category,
-			"strict":   match.Strict,
-		})
-	}
 	other := map[string]interface{}{
 		"code":              settings.BlockErrorCode,
 		"source":            "local_filter",
@@ -1459,7 +1452,7 @@ func RecordPromptFilterRejectLog(c *gin.Context, endpoint string, verdict Prompt
 		"raw_score":         verdict.RawScore,
 		"threshold":         verdict.Threshold,
 		"strict_hit":        verdict.StrictHit,
-		"matched":           matches,
+		"matched":           promptFilterLogMatches(verdict.Matched),
 		"text_preview":      RedactedPromptFilterPreview(verdict.TextPreview, 500),
 		"extracted_chars":   verdict.ExtractedChars,
 		"prompt_filter_msg": verdict.Reason,
@@ -1474,6 +1467,38 @@ func RecordPromptFilterRejectLog(c *gin.Context, endpoint string, verdict Prompt
 		other["full_text"] = RedactedPromptFilterPreview(verdict.FullText, 32000)
 	}
 	model.RecordPromptFilterRejectLog(c, settings.Message, other)
+}
+
+func promptFilterLogMatches(matches []PromptFilterMatch) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(matches))
+	for _, match := range matches {
+		item := map[string]interface{}{
+			"name":     match.Name,
+			"weight":   match.Weight,
+			"category": match.Category,
+			"strict":   match.Strict,
+		}
+		term := promptFilterPreview(RedactPromptFilterSensitive(match.Term), promptFilterMatchTermMaxRunes)
+		if term != "" {
+			item["term"] = term
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+func promptFilterPatternMatchTerm(re *regexp.Regexp, text string) (string, bool) {
+	if re == nil {
+		return "", false
+	}
+	indexes := re.FindStringIndex(text)
+	if indexes == nil {
+		return "", false
+	}
+	if len(indexes) != 2 || indexes[0] < 0 || indexes[1] < indexes[0] || indexes[1] > len(text) {
+		return "", true
+	}
+	return promptFilterPreview(text[indexes[0]:indexes[1]], promptFilterMatchTermMaxRunes), true
 }
 
 func promptFilterLogStatusCode(action string, settings system_setting.PromptFilterSettings) int {

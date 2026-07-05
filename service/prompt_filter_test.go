@@ -191,6 +191,7 @@ func TestInspectPromptTextBlocksConfiguredSensitiveWord(t *testing.T) {
 	require.Equal(t, PromptFilterActionBlock, verdict.Action)
 	require.NotEmpty(t, verdict.Matched)
 	assert.Equal(t, "sensitive_word", verdict.Matched[0].Name)
+	assert.Equal(t, "customer-secret-keyword", verdict.Matched[0].Term)
 	assert.NotContains(t, verdict.Matched[0].Name, "customer-secret-keyword")
 }
 
@@ -313,6 +314,35 @@ func TestInspectPromptTextBlocksEnabledLexiconFile(t *testing.T) {
 	require.Equal(t, PromptFilterActionBlock, verdict.Action)
 	require.NotEmpty(t, verdict.Matched)
 	assert.Equal(t, "lexicon:验收词库", verdict.Matched[0].Name)
+	assert.Equal(t, "acceptance_block_test", verdict.Matched[0].Term)
+}
+
+func TestPromptFilterLogMatchesIncludesRedactedMatchedTerm(t *testing.T) {
+	matches := promptFilterLogMatches([]PromptFilterMatch{
+		{
+			Name:     "lexicon:测试词库",
+			Weight:   100,
+			Category: "测试",
+			Strict:   true,
+			Term:     "硬件信息",
+		},
+		{
+			Name:     "sensitive_word",
+			Weight:   100,
+			Category: "sensitive_word",
+			Strict:   true,
+			Term:     "sk-sensitive-token",
+		},
+		{
+			Name:   "generic_exploit",
+			Weight: 10,
+		},
+	})
+
+	require.Len(t, matches, 3)
+	assert.Equal(t, "硬件信息", matches[0]["term"])
+	assert.Equal(t, "[REDACTED_API_KEY]", matches[1]["term"])
+	assert.NotContains(t, matches[2], "term")
 }
 
 func TestInspectPromptTextDoesNotMatchAsciiLexiconInsideLongerWords(t *testing.T) {
@@ -672,6 +702,7 @@ func TestInspectPromptTextBlocksCustomPattern(t *testing.T) {
 	require.Equal(t, PromptFilterActionBlock, verdict.Action)
 	require.NotEmpty(t, verdict.Matched)
 	assert.Equal(t, "custom_policy", verdict.Matched[0].Name)
+	assert.Equal(t, "custom forbidden phrase", verdict.Matched[0].Term)
 }
 
 func TestInspectPromptTextDisabledBuiltinPatternAllowsRequest(t *testing.T) {
