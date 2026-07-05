@@ -42,15 +42,7 @@ func GetPromptFilterStatus(c *gin.Context) {
 	settings := system_setting.GetPromptFilterSettings()
 	logTotal, _ := model.CountPromptFilterLogs()
 	rules := service.ListPromptFilterRules()
-	lexiconWordCount := 0
-	lexiconFileCount := 0
-	for _, file := range settings.LexiconFiles {
-		if !file.Enabled {
-			continue
-		}
-		lexiconFileCount++
-		lexiconWordCount += file.WordCount
-	}
+	lexiconFileCount, lexiconWordCount := service.PromptFilterLexiconStats(settings)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

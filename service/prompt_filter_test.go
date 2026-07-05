@@ -423,6 +423,95 @@ func TestPromptFilterPresetLexiconsAreVisibleDisabledAndPreviewable(t *testing.T
 	assert.LessOrEqual(t, len(preview.Words), 3)
 }
 
+func TestPromptFilterCuratedPresetsExposeOnlyRequestedCategories(t *testing.T) {
+	withPromptFilterSettings(t, nil)
+
+	files := ListPromptFilterLexiconFiles()
+	presetNames := map[string]string{}
+	for _, file := range files {
+		if file.Source != promptFilterLexiconSourcePreset {
+			continue
+		}
+		presetNames[file.Name] = file.Category
+		assert.False(t, file.Enabled)
+		assert.True(t, strings.HasPrefix(file.ID, "preset:curated:"))
+	}
+
+	assert.Equal(t, map[string]string{
+		"精简-暴力": "暴力",
+		"精简-涉政": "涉政",
+		"精简-色情": "色情",
+	}, presetNames)
+}
+
+func TestPromptFilterCuratedPresetsAvoidBroadCommonTerms(t *testing.T) {
+	withPromptFilterSettings(t, nil)
+
+	broadTerms := map[string]struct{}{
+		"信息": {}, "系统": {}, "手机": {}, "网站": {}, "网址": {},
+		"网络": {}, "国家": {}, "美国": {}, "中国": {}, "政府": {},
+		"中央": {}, "主席": {}, "书记": {}, "政治": {}, "人民": {},
+		"疫情": {}, "检查": {}, "模型": {}, "电脑": {}, "开发": {},
+		"天安门": {}, "台湾": {}, "香港": {}, "西藏": {}, "新疆": {},
+		"民主": {}, "自由": {}, "人权": {}, "维吾尔人": {}, "独裁者": {},
+	}
+	for _, file := range ListPromptFilterLexiconFiles() {
+		if file.Source != promptFilterLexiconSourcePreset {
+			continue
+		}
+		preview, err := GetPromptFilterLexiconPreview(file.ID, maxPromptFilterLexiconWords)
+		require.NoError(t, err)
+		require.False(t, preview.Truncated)
+		for _, word := range preview.Words {
+			_, tooBroad := broadTerms[strings.TrimSpace(word)]
+			assert.Falsef(t, tooBroad, "%s contains broad term %q", file.Name, word)
+			assert.Greaterf(t, utf8.RuneCountInString(strings.TrimSpace(word)), 1, "%s contains too-short term %q", file.Name, word)
+		}
+	}
+}
+
+func TestPromptFilterLegacyKonshengPresetsAreIgnored(t *testing.T) {
+	withPromptFilterSettings(t, nil)
+
+	legacyFile := system_setting.PromptFilterLexiconFile{
+		ID:         "preset:konsheng:legacy",
+		Name:       "GFW补充词库",
+		StoredName: "preset_konsheng_legacy_GFW.txt",
+		WordCount:  1,
+		Weight:     100,
+		Strict:     true,
+		Enabled:    true,
+		Source:     promptFilterLexiconSourcePreset,
+	}
+	data, err := common.Marshal([]system_setting.PromptFilterLexiconFile{legacyFile})
+	require.NoError(t, err)
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"prompt_filter_setting.lexicon_files": string(data),
+	}))
+
+	for _, file := range ListPromptFilterLexiconFiles() {
+		assert.NotEqual(t, legacyFile.ID, file.ID)
+	}
+	fileCount, wordCount := PromptFilterLexiconStats(system_setting.GetPromptFilterSettings())
+	assert.Equal(t, 0, fileCount)
+	assert.Equal(t, 0, wordCount)
+
+	_, err = GetPromptFilterLexiconPreview(legacyFile.ID, 1)
+	require.Error(t, err)
+
+	enabled := false
+	_, err = UpdatePromptFilterLexicon(legacyFile.ID, PromptFilterLexiconUpdate{Enabled: &enabled})
+	require.Error(t, err)
+
+	_, err = UpdatePromptFilterLexiconWords(legacyFile.ID, []string{"revived_legacy_word"})
+	require.Error(t, err)
+
+	keywords := promptFilterKeywords(system_setting.GetPromptFilterSettings())
+	for _, keyword := range keywords {
+		assert.NotContains(t, keyword.key, legacyFile.ID)
+	}
+}
+
 func TestPromptFilterPresetLexiconCanBeEditedAndEnabled(t *testing.T) {
 	withPromptFilterSettings(t, nil)
 	setupPromptFilterOptionDB(t)

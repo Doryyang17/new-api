@@ -77,7 +77,7 @@ type promptFilterKeywordMatcher struct {
 }
 
 func ListPromptFilterLexiconFiles() []system_setting.PromptFilterLexiconFile {
-	files := append([]system_setting.PromptFilterLexiconFile(nil), system_setting.GetPromptFilterSettings().LexiconFiles...)
+	files := promptFilterActiveConfiguredLexiconFiles(system_setting.GetPromptFilterSettings().LexiconFiles)
 	presets, err := promptFilterPresetLexicons()
 	if err == nil {
 		savedByID := make(map[string]int, len(files))
@@ -110,6 +110,19 @@ func ListPromptFilterLexiconFiles() []system_setting.PromptFilterLexiconFile {
 		return files[i].UploadedAt > files[j].UploadedAt
 	})
 	return files
+}
+
+func PromptFilterLexiconStats(settings system_setting.PromptFilterSettings) (int, int) {
+	fileCount := 0
+	wordCount := 0
+	for _, file := range promptFilterActiveConfiguredLexiconFiles(settings.LexiconFiles) {
+		if !file.Enabled {
+			continue
+		}
+		fileCount++
+		wordCount += file.WordCount
+	}
+	return fileCount, wordCount
 }
 
 func UploadPromptFilterLexicon(fileName string, reader io.Reader, size int64, options PromptFilterLexiconUploadOptions) (system_setting.PromptFilterLexiconFile, error) {
@@ -201,6 +214,9 @@ func UpdatePromptFilterLexicon(id string, update PromptFilterLexiconUpdate) (sys
 	id = strings.TrimSpace(id)
 	files := system_setting.GetPromptFilterSettings().LexiconFiles
 	for i := range files {
+		if promptFilterLegacyPresetLexicon(files[i]) {
+			continue
+		}
 		if files[i].ID != id {
 			continue
 		}
@@ -295,6 +311,9 @@ func UpdatePromptFilterLexiconWords(id string, words []string) (system_setting.P
 	}
 	files := system_setting.GetPromptFilterSettings().LexiconFiles
 	for i := range files {
+		if promptFilterLegacyPresetLexicon(files[i]) {
+			continue
+		}
 		if files[i].ID != id {
 			continue
 		}
@@ -558,6 +577,9 @@ func loadPromptFilterLexiconWords(id string) (system_setting.PromptFilterLexicon
 		return system_setting.PromptFilterLexiconFile{}, nil, fmt.Errorf("词库文件不存在")
 	}
 	for _, file := range system_setting.GetPromptFilterSettings().LexiconFiles {
+		if promptFilterLegacyPresetLexicon(file) {
+			continue
+		}
 		if file.ID != id {
 			continue
 		}
@@ -623,6 +645,24 @@ func promptFilterLexiconFileWithSource(file system_setting.PromptFilterLexiconFi
 		file.Source = promptFilterLexiconSourcePreset
 	}
 	return file
+}
+
+func promptFilterActiveConfiguredLexiconFiles(files []system_setting.PromptFilterLexiconFile) []system_setting.PromptFilterLexiconFile {
+	active := make([]system_setting.PromptFilterLexiconFile, 0, len(files))
+	for _, file := range files {
+		if promptFilterLegacyPresetLexicon(file) {
+			continue
+		}
+		active = append(active, file)
+	}
+	return active
+}
+
+func promptFilterLegacyPresetLexicon(file system_setting.PromptFilterLexiconFile) bool {
+	id := strings.TrimSpace(file.ID)
+	storedName := strings.TrimSpace(file.StoredName)
+	return strings.HasPrefix(id, "preset:konsheng:") ||
+		strings.HasPrefix(storedName, "prompt_filter_presets/konsheng/")
 }
 
 func promptFilterLexiconTextFileName(fileName string) string {
@@ -718,6 +758,9 @@ func promptFilterKeywords(settings system_setting.PromptFilterSettings) []prompt
 		})
 	}
 	for _, file := range settings.LexiconFiles {
+		if promptFilterLegacyPresetLexicon(file) {
+			continue
+		}
 		if !file.Enabled || file.WordCount == 0 || strings.TrimSpace(file.StoredName) == "" {
 			continue
 		}

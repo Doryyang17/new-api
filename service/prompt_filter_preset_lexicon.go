@@ -15,10 +15,10 @@ import (
 const (
 	promptFilterLexiconSourcePreset = "preset"
 	promptFilterLexiconSourceUpload = "upload"
-	promptFilterPresetLexiconRoot   = "prompt_filter_presets/konsheng"
+	promptFilterPresetLexiconRoot   = "prompt_filter_presets/curated"
 )
 
-//go:embed prompt_filter_presets/konsheng/*.txt
+//go:embed prompt_filter_presets/curated/*.txt
 var promptFilterPresetLexiconFS embed.FS
 
 type promptFilterPresetLexicon struct {
@@ -105,11 +105,11 @@ func collectPromptFilterPresetLexicons() ([]promptFilterPresetLexicon, error) {
 			return nil, err
 		}
 		contentHash := sha256.Sum256(data)
-		idHash := sha256.Sum256([]byte("konsheng/" + dirEntry.Name()))
+		idHash := sha256.Sum256([]byte("curated/" + dirEntry.Name()))
 		name := strings.TrimSuffix(dirEntry.Name(), path.Ext(dirEntry.Name()))
 		entries = append(entries, promptFilterPresetLexicon{
 			file: system_setting.PromptFilterLexiconFile{
-				ID:           "preset:konsheng:" + hex.EncodeToString(idHash[:])[:12],
+				ID:           "preset:curated:" + hex.EncodeToString(idHash[:])[:12],
 				Name:         name,
 				OriginalName: dirEntry.Name(),
 				StoredName:   filePath,
@@ -136,8 +136,9 @@ func promptFilterPresetLexiconCategory(name string) string {
 	for _, suffix := range []string{"词库", "类型"} {
 		category = strings.TrimSuffix(category, suffix)
 	}
+	category = strings.TrimPrefix(category, "精简-")
 	if category == "" {
-		return "konsheng"
+		return "curated"
 	}
 	return category
 }
