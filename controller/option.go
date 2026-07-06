@@ -357,6 +357,13 @@ func UpdateOption(c *gin.Context) {
 	}
 	if option.Key == "daily_usage_setting.enabled" {
 		enabled, _ := strconv.ParseBool(strings.TrimSpace(option.Value.(string)))
+		if enabled && !common.LogConsumeEnabled {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": system_setting.DailyUsageRequiresLogsMsg,
+			})
+			return
+		}
 		if enabled && system_setting.GetDailyUsageLimitSettings().LimitTokens <= 0 {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -371,6 +378,16 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "daily usage token limit must be greater than 0 when enabled",
+			})
+			return
+		}
+	}
+	if option.Key == "LogConsumeEnabled" {
+		logConsumeEnabled, _ := strconv.ParseBool(strings.TrimSpace(option.Value.(string)))
+		if !logConsumeEnabled && system_setting.GetDailyUsageLimitSettings().Enabled {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": system_setting.DailyUsageRequiresLogsMsg,
 			})
 			return
 		}

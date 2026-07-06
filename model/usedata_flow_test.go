@@ -191,3 +191,37 @@ func TestLogQuotaDataSplitsRowsByUseGroupTokenChannelAndNode(t *testing.T) {
 	require.Equal(t, "default", rows[1].UseGroup)
 	require.Equal(t, 25, rows[1].Quota)
 }
+
+func TestLogQuotaDataSkipCountKeepsTokenUsed(t *testing.T) {
+	truncateTables(t)
+	CacheQuotaDataLock.Lock()
+	CacheQuotaData = make(map[string]*QuotaData)
+	CacheQuotaDataLock.Unlock()
+
+	LogQuotaData(QuotaDataLogParams{
+		UserID:    1,
+		Username:  "alice",
+		ModelName: "gpt-a",
+		CreatedAt: 3661,
+		UseGroup:  "vip",
+		Quota:     100,
+		TokenUsed: 40,
+	})
+	LogQuotaData(QuotaDataLogParams{
+		UserID:    1,
+		Username:  "alice",
+		ModelName: "gpt-a",
+		CreatedAt: 3700,
+		UseGroup:  "vip",
+		TokenUsed: 20,
+		SkipCount: true,
+	})
+
+	SaveQuotaDataCache()
+
+	var row QuotaData
+	require.NoError(t, DB.First(&row).Error)
+	require.Equal(t, 1, row.Count)
+	require.Equal(t, 100, row.Quota)
+	require.Equal(t, 60, row.TokenUsed)
+}

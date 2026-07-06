@@ -42,6 +42,7 @@ func TestMain(m *testing.M) {
 		&model.Token{},
 		&model.Log{},
 		&model.Channel{},
+		&model.SystemDailyUsageCounter{},
 		&model.TopUp{},
 		&model.UserSubscription{},
 		&model.SystemTask{},
@@ -65,6 +66,7 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM tokens")
 		model.DB.Exec("DELETE FROM logs")
 		model.DB.Exec("DELETE FROM channels")
+		model.DB.Exec("DELETE FROM system_daily_usage_counters")
 		model.DB.Exec("DELETE FROM top_ups")
 		model.DB.Exec("DELETE FROM user_subscriptions")
 		model.DB.Exec("DELETE FROM system_task_locks")
@@ -186,6 +188,15 @@ func countLogs(t *testing.T) int64 {
 	var count int64
 	model.LOG_DB.Model(&model.Log{}).Count(&count)
 	return count
+}
+
+func sumLogTokens(t *testing.T) int64 {
+	t.Helper()
+	var total int64
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).
+		Select("COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0)").
+		Scan(&total).Error)
+	return total
 }
 
 // ===========================================================================
@@ -677,7 +688,7 @@ func TestSettle_PerCallBilling_SkipsTotalTokens(t *testing.T) {
 	task.PrivateData.BillingContext.PerCallBilling = true
 
 	adaptor := &mockAdaptor{adjustReturn: 0}
-	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, TotalTokens: 9999}
+	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, TotalTokens: 9999, CompletionTokens: 1234}
 
 	settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
 
@@ -685,7 +696,14 @@ func TestSettle_PerCallBilling_SkipsTotalTokens(t *testing.T) {
 	assert.Equal(t, initQuota, getUserQuota(t, userID))
 	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
 	assert.Equal(t, preConsumed, task.Quota)
-	assert.Equal(t, int64(0), countLogs(t))
+	assert.Equal(t, int64(1), countLogs(t))
+	assert.Equal(t, int64(9999), sumLogTokens(t))
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Equal(t, 8765, log.PromptTokens)
+	assert.Equal(t, 1234, log.CompletionTokens)
+	assert.Equal(t, 0, log.Quota)
 }
 
 func TestSettle_NonPerCallBilling_AppliesAdaptorAdjustment(t *testing.T) {

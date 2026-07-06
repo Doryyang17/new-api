@@ -37,6 +37,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	}
 	other := make(map[string]interface{})
 	other["is_task"] = true
+	if info.PublicTaskID != "" {
+		other["task_id"] = info.PublicTaskID
+	}
 	other["request_path"] = c.Request.URL.Path
 	other["model_price"] = info.PriceData.ModelPrice
 	if info.PriceData.ModelRatio > 0 {
@@ -145,6 +148,50 @@ func taskModelName(task *model.Task) string {
 		return bc.OriginModelName
 	}
 	return task.Properties.OriginModelName
+}
+
+func taskTokenUsageModelName(task *model.Task) string {
+	modelName := taskModelName(task)
+	if modelName != "" {
+		return modelName
+	}
+	var taskData map[string]interface{}
+	if err := common.Unmarshal(task.Data, &taskData); err == nil {
+		if dataModel, ok := taskData["model"].(string); ok {
+			return dataModel
+		}
+	}
+	return ""
+}
+
+func RecordTaskTokenUsageLog(ctx context.Context, task *model.Task, totalTokens int, completionTokens int) {
+	if task == nil || totalTokens <= 0 {
+		return
+	}
+	if completionTokens < 0 {
+		completionTokens = 0
+	}
+	if completionTokens > totalTokens {
+		completionTokens = totalTokens
+	}
+	promptTokens := totalTokens - completionTokens
+	other := taskBillingOther(task)
+	other["task_id"] = task.TaskID
+	other["usage_only"] = true
+	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+		UserId:           task.UserId,
+		LogType:          model.LogTypeConsume,
+		Content:          "任务 token 用量",
+		ChannelId:        task.ChannelId,
+		ModelName:        taskTokenUsageModelName(task),
+		Quota:            0,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TokenId:          task.PrivateData.TokenId,
+		Group:            task.Group,
+		Other:            other,
+		NodeName:         task.PrivateData.NodeName,
+	})
 }
 
 // RefundTaskQuota 统一的任务失败退款逻辑。

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 )
@@ -31,9 +32,10 @@ type SystemDailyUsageStatus struct {
 }
 
 var (
-	systemDailyUsageMu     sync.RWMutex
-	systemDailyUsageStatus SystemDailyUsageStatus
-	systemDailyUsageLoaded bool
+	systemDailyUsageMu        sync.RWMutex
+	systemDailyUsageRefreshMu sync.Mutex
+	systemDailyUsageStatus    SystemDailyUsageStatus
+	systemDailyUsageLoaded    bool
 )
 
 func StartSystemDailyUsageUpdater() {
@@ -60,18 +62,13 @@ func GetSystemDailyUsageStatus() SystemDailyUsageStatus {
 	if loaded && status.settingsSignature == signature && now.Unix() < status.NextRefreshAt {
 		return status
 	}
-	if !settings.Enabled {
-		status.Enabled = false
-		status.Exceeded = false
-		return status
-	}
-	return buildUnrefreshedDailyUsageStatus(now, settings, signature)
+	return refreshSystemDailyUsageStatusOnce(settings, signature)
 }
 
 func RefreshSystemDailyUsageStatus(now time.Time) SystemDailyUsageStatus {
 	settings := system_setting.GetDailyUsageLimitSettings()
 	signature := dailyUsageSettingsSignature(settings)
-	status := buildSystemDailyUsageStatus(now, settings, signature, model.GetSystemDailyUsageTokens)
+	status := buildSystemDailyUsageStatus(now, settings, signature, model.RefreshSystemDailyUsageSnapshot)
 
 	systemDailyUsageMu.Lock()
 	systemDailyUsageStatus = status
@@ -81,11 +78,33 @@ func RefreshSystemDailyUsageStatus(now time.Time) SystemDailyUsageStatus {
 	return status
 }
 
+func refreshSystemDailyUsageStatusOnce(settings system_setting.DailyUsageLimitSettings, signature string) SystemDailyUsageStatus {
+	systemDailyUsageRefreshMu.Lock()
+	defer systemDailyUsageRefreshMu.Unlock()
+
+	now := time.Now()
+	systemDailyUsageMu.RLock()
+	status := systemDailyUsageStatus
+	loaded := systemDailyUsageLoaded
+	systemDailyUsageMu.RUnlock()
+
+	if loaded && status.settingsSignature == signature && now.Unix() < status.NextRefreshAt {
+		return status
+	}
+
+	status = buildSystemDailyUsageStatus(now, settings, signature, model.RefreshSystemDailyUsageSnapshot)
+	systemDailyUsageMu.Lock()
+	systemDailyUsageStatus = status
+	systemDailyUsageLoaded = true
+	systemDailyUsageMu.Unlock()
+	return status
+}
+
 func (s SystemDailyUsageStatus) ShouldBlock() bool {
 	return s.Enabled && s.Exceeded
 }
 
-func buildSystemDailyUsageStatus(now time.Time, settings system_setting.DailyUsageLimitSettings, signature string, getTokens func(int64, string) (int64, error)) SystemDailyUsageStatus {
+func buildSystemDailyUsageStatus(now time.Time, settings system_setting.DailyUsageLimitSettings, signature string, refreshSnapshot func(int64, string, int64) (int64, error)) SystemDailyUsageStatus {
 	status := baseSystemDailyUsageStatus(now, settings, signature)
 	location, err := time.LoadLocation(status.Timezone)
 	if err != nil {
@@ -99,8 +118,16 @@ func buildSystemDailyUsageStatus(now time.Time, settings system_setting.DailyUsa
 	if settings.Enabled && settings.LimitTokens <= 0 {
 		return status.failClosed("daily usage token limit must be greater than 0 when enabled")
 	}
+	if !common.LogConsumeEnabled {
+		errMsg := system_setting.DailyUsageRequiresLogsMsg
+		if settings.Enabled {
+			return status.failClosed(errMsg)
+		}
+		status.EvaluationError = errMsg
+		return status
+	}
 
-	usedTokens, err := getTokens(status.DayStart, status.Timezone)
+	usedTokens, err := refreshSnapshot(status.DayStart, status.Timezone, status.RefreshedAt)
 	if err != nil {
 		if settings.Enabled {
 			return status.failClosed(err.Error())
@@ -112,18 +139,6 @@ func buildSystemDailyUsageStatus(now time.Time, settings system_setting.DailyUsa
 	status.RemainingTokens = remainingDailyUsageTokens(settings.LimitTokens, usedTokens)
 	status.Exceeded = settings.Enabled && settings.LimitTokens > 0 && usedTokens >= settings.LimitTokens
 	return status
-}
-
-func buildUnrefreshedDailyUsageStatus(now time.Time, settings system_setting.DailyUsageLimitSettings, signature string) SystemDailyUsageStatus {
-	status := baseSystemDailyUsageStatus(now, settings, signature)
-	location, err := time.LoadLocation(status.Timezone)
-	if err == nil {
-		dayStart, dayEnd := dailyUsageDayRange(now, location)
-		status.DayStart = dayStart.Unix()
-		status.DayEnd = dayEnd.Unix()
-		status.RetryAfterSeconds = secondsUntil(now, dayEnd)
-	}
-	return status.failClosed("daily usage status snapshot is not refreshed")
 }
 
 func baseSystemDailyUsageStatus(now time.Time, settings system_setting.DailyUsageLimitSettings, signature string) SystemDailyUsageStatus {

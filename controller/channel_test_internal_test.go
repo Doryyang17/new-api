@@ -3,13 +3,17 @@ package controller
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -109,6 +113,55 @@ func TestSelectChannelsForAutomaticTestScheduledSkipsManualDisabled(t *testing.T
 	require.Len(t, selected, 2)
 	require.Equal(t, 1, selected[0].Id)
 	require.Equal(t, 2, selected[1].Id)
+}
+
+func TestChannelTestDailyUsageLimitReturnsRetrySafeError(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.SystemDailyUsageCounter{}))
+
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		if strings.HasPrefix(key, "daily_usage_setting.") {
+			saved[key] = value
+		}
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+		service.RefreshSystemDailyUsageStatus(time.Now())
+	})
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"daily_usage_setting.enabled":      "true",
+		"daily_usage_setting.limit_tokens": "1",
+		"daily_usage_setting.timezone":     "UTC",
+		"daily_usage_setting.message":      "daily limit exceeded",
+	}))
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		CreatedAt:        time.Now().Unix(),
+		Type:             model.LogTypeConsume,
+		PromptTokens:     1,
+		CompletionTokens: 0,
+	}).Error)
+	service.RefreshSystemDailyUsageStatus(time.Now())
+	channel := &model.Channel{Id: 1, Name: "daily-limit-test", Key: "sk-test", Status: common.ChannelStatusEnabled}
+	require.NoError(t, db.Create(channel).Error)
+
+	result := testChannel(nil, channel, 1, "", "", false)
+	require.Error(t, result.localErr)
+	require.NotNil(t, result.newAPIError)
+	require.Equal(t, types.ErrorCodeSystemDailyUsageExceeded, result.newAPIError.GetErrorCode())
+	require.True(t, types.IsSkipRetryError(result.newAPIError))
+
+	summary := performChannelTests(nil, []*model.Channel{channel}, 1, true, nil)
+	require.Equal(t, 1, summary.Tested)
+	require.Equal(t, 0, summary.Succeeded)
+	require.Equal(t, 1, summary.Failed)
+	require.Equal(t, 0, summary.Disabled)
+
+	var persisted model.Channel
+	require.NoError(t, db.First(&persisted, channel.Id).Error)
+	require.Zero(t, persisted.TestTime)
+	require.Zero(t, persisted.ResponseTime)
 }
 
 func TestTestAllChannelsRejectsExistingActiveTask(t *testing.T) {

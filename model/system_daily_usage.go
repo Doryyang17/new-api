@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting/system_setting"
-	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -23,32 +21,14 @@ func (SystemDailyUsageCounter) TableName() string {
 	return "system_daily_usage_counters"
 }
 
-func RecordSystemDailyUsageTokens(timestamp int64, tokenUsed int64) error {
-	if tokenUsed <= 0 {
-		return nil
-	}
-	settings := system_setting.GetDailyUsageLimitSettings()
-	timezone := settings.Timezone
-	dayStart, err := systemDailyUsageDayStart(timestamp, timezone)
-	if err != nil {
-		common.SysError(fmt.Sprintf("invalid daily usage timezone %q, fallback to %s: %s", timezone, system_setting.DefaultDailyUsageLimitTZ, err.Error()))
-		timezone = system_setting.DefaultDailyUsageLimitTZ
-		dayStart, err = systemDailyUsageDayStart(timestamp, timezone)
-		if err != nil {
-			return err
-		}
-	}
-	return IncrementSystemDailyUsageCounter(dayStart, timezone, tokenUsed, timestamp)
-}
-
-func IncrementSystemDailyUsageCounter(dayStart int64, timezone string, tokenUsed int64, updatedAt int64) error {
-	if tokenUsed <= 0 {
-		return nil
+func SaveSystemDailyUsageSnapshot(dayStart int64, timezone string, usedTokens int64, updatedAt int64) error {
+	if usedTokens < 0 {
+		usedTokens = 0
 	}
 	counter := SystemDailyUsageCounter{
 		DayStart:   dayStart,
 		Timezone:   timezone,
-		UsedTokens: tokenUsed,
+		UsedTokens: usedTokens,
 		CreatedAt:  updatedAt,
 		UpdatedAt:  updatedAt,
 	}
@@ -58,22 +38,46 @@ func IncrementSystemDailyUsageCounter(dayStart int64, timezone string, tokenUsed
 			{Name: "timezone"},
 		},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"used_tokens": gorm.Expr("used_tokens + ?", tokenUsed),
+			"used_tokens": usedTokens,
 			"updated_at":  updatedAt,
 		}),
 	}).Create(&counter).Error
 }
 
-func GetSystemDailyUsageTokens(dayStart int64, timezone string) (int64, error) {
-	var counter SystemDailyUsageCounter
-	if err := DB.Where("day_start = ? AND timezone = ?", dayStart, timezone).Limit(1).Find(&counter).Error; err != nil {
-		common.SysError("failed to query system daily usage counter: " + err.Error())
+func RefreshSystemDailyUsageSnapshot(dayStart int64, timezone string, updatedAt int64) (int64, error) {
+	usedTokens, err := GetSystemDailyUsageLogTokens(dayStart, timezone)
+	if err != nil {
+		common.SysError("failed to query system daily usage logs: " + err.Error())
 		return 0, fmt.Errorf("查询统计数据失败")
 	}
-	if counter.Id == 0 {
-		return 0, nil
+	if err := SaveSystemDailyUsageSnapshot(dayStart, timezone, usedTokens, updatedAt); err != nil {
+		common.SysError("failed to save system daily usage snapshot: " + err.Error())
+		return 0, fmt.Errorf("保存统计快照失败")
 	}
-	return counter.UsedTokens, nil
+	return usedTokens, nil
+}
+
+func GetSystemDailyUsageSnapshotTokens(dayStart int64, timezone string) (int64, error) {
+	var usedTokens int64
+	err := DB.Model(&SystemDailyUsageCounter{}).
+		Select("COALESCE(sum(used_tokens), 0)").
+		Where("day_start = ? AND timezone = ?", dayStart, timezone).
+		Scan(&usedTokens).Error
+	return usedTokens, err
+}
+
+func GetSystemDailyUsageLogTokens(dayStart int64, timezone string) (int64, error) {
+	dayEnd, err := systemDailyUsageDayEnd(dayStart, timezone)
+	if err != nil {
+		return 0, err
+	}
+	var usedTokens int64
+	err = LOG_DB.Table("logs").
+		Select("COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0)").
+		Where("type = ?", LogTypeConsume).
+		Where("created_at >= ? AND created_at < ?", dayStart, dayEnd).
+		Scan(&usedTokens).Error
+	return usedTokens, err
 }
 
 func systemDailyUsageDayStart(timestamp int64, timezone string) (int64, error) {
@@ -84,4 +88,12 @@ func systemDailyUsageDayStart(timestamp int64, timezone string) (int64, error) {
 	localTime := time.Unix(timestamp, 0).In(location)
 	dayStart := time.Date(localTime.Year(), localTime.Month(), localTime.Day(), 0, 0, 0, 0, location)
 	return dayStart.Unix(), nil
+}
+
+func systemDailyUsageDayEnd(dayStart int64, timezone string) (int64, error) {
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		return 0, err
+	}
+	return time.Unix(dayStart, 0).In(location).AddDate(0, 0, 1).Unix(), nil
 }

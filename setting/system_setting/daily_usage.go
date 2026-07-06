@@ -13,6 +13,7 @@ const (
 	DefaultDailyUsageLimitTZ  = DefaultAvailabilityTZ
 	DefaultDailyUsageLimitMsg = "当日系统使用量已超上限，请每天再来。"
 	DailyUsageLimitRejectCode = "system_daily_usage_exceeded"
+	DailyUsageRequiresLogsMsg = "每日使用量限制依赖消费日志，请先开启消费日志"
 )
 
 type DailyUsageLimitSettings struct {

@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
@@ -151,6 +152,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor channel.TaskAdaptor, cha
 
 		// 如果返回了 total_tokens 并且配置了模型倍率(非固定价格),则重新计费
 		if taskResult.TotalTokens > 0 {
+			if preStatus != model.TaskStatusSuccess {
+				service.RecordTaskTokenUsageLog(ctx, task, taskResult.TotalTokens, taskResult.CompletionTokens)
+			}
 			// 获取模型名称
 			var taskData map[string]interface{}
 			if err := json.Unmarshal(task.Data, &taskData); err == nil {

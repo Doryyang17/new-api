@@ -36,9 +36,10 @@ import (
 )
 
 type testResult struct {
-	context     *gin.Context
-	localErr    error
-	newAPIError *types.NewAPIError
+	context           *gin.Context
+	localErr          error
+	newAPIError       *types.NewAPIError
+	upstreamRequested bool
 }
 
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
@@ -75,6 +76,13 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if status := service.GetSystemDailyUsageStatus(); status.ShouldBlock() {
+		err := errors.New(status.Message)
+		return testResult{
+			localErr:    err,
+			newAPIError: types.NewErrorWithStatusCode(err, types.ErrorCodeSystemDailyUsageExceeded, http.StatusTooManyRequests, types.ErrOptionWithSkipRetry()),
+		}
 	}
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
@@ -431,9 +439,10 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		return testResult{
-			context:     c,
-			localErr:    err,
-			newAPIError: types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError),
+			context:           c,
+			localErr:          err,
+			newAPIError:       types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError),
+			upstreamRequested: true,
 		}
 	}
 	var httpResp *http.Response
@@ -452,42 +461,47 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 				err,
 			))
 			return testResult{
-				context:     c,
-				localErr:    err,
-				newAPIError: types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError),
+				context:           c,
+				localErr:          err,
+				newAPIError:       types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError),
+				upstreamRequested: true,
 			}
 		}
 	}
 	usageA, respErr := adaptor.DoResponse(c, httpResp, info)
 	if respErr != nil {
 		return testResult{
-			context:     c,
-			localErr:    respErr,
-			newAPIError: respErr,
+			context:           c,
+			localErr:          respErr,
+			newAPIError:       respErr,
+			upstreamRequested: true,
 		}
 	}
 	usage, usageErr := coerceTestUsage(usageA, isStream, info.GetEstimatePromptTokens())
 	if usageErr != nil {
 		return testResult{
-			context:     c,
-			localErr:    usageErr,
-			newAPIError: types.NewOpenAIError(usageErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
+			context:           c,
+			localErr:          usageErr,
+			newAPIError:       types.NewOpenAIError(usageErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
+			upstreamRequested: true,
 		}
 	}
 	result := w.Result()
 	respBody, err := readTestResponseBody(result.Body, isStream)
 	if err != nil {
 		return testResult{
-			context:     c,
-			localErr:    err,
-			newAPIError: types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError),
+			context:           c,
+			localErr:          err,
+			newAPIError:       types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError),
+			upstreamRequested: true,
 		}
 	}
 	if bodyErr := validateTestResponseBody(respBody, isStream); bodyErr != nil {
 		return testResult{
-			context:     c,
-			localErr:    bodyErr,
-			newAPIError: types.NewOpenAIError(bodyErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
+			context:           c,
+			localErr:          bodyErr,
+			newAPIError:       types.NewOpenAIError(bodyErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
+			upstreamRequested: true,
 		}
 	}
 	info.SetEstimatePromptTokens(usage.PromptTokens)
@@ -512,9 +526,10 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	})
 	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
 	return testResult{
-		context:     c,
-		localErr:    nil,
-		newAPIError: nil,
+		context:           c,
+		localErr:          nil,
+		newAPIError:       nil,
+		upstreamRequested: true,
 	}
 }
 
@@ -967,7 +982,9 @@ func performChannelTests(ctx context.Context, channels []*model.Channel, testUse
 			summary.Enabled++
 		}
 
-		channel.UpdateResponseTime(milliseconds)
+		if result.upstreamRequested {
+			channel.UpdateResponseTime(milliseconds)
+		}
 		if common.RequestInterval > 0 {
 			if ctx == nil {
 				time.Sleep(common.RequestInterval)
