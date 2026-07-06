@@ -62,6 +62,9 @@ func populateAvailabilityTokenContext(c *gin.Context) {
 		return
 	}
 	c.Set("id", token.UserId)
+	if username, err := model.GetUsernameById(token.UserId, false); err == nil {
+		c.Set("username", username)
+	}
 	c.Set("token_id", token.Id)
 	c.Set("token_key", token.Key)
 	c.Set("token_name", token.Name)

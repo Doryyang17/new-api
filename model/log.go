@@ -292,6 +292,11 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	isStream bool, group string, other map[string]interface{}) {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
 	username := c.GetString("username")
+	if username == "" && userId != 0 {
+		if resolvedUsername, err := GetUsernameById(userId, false); err == nil {
+			username = resolvedUsername
+		}
+	}
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	otherStr := common.MapToJsonStr(other)
@@ -552,7 +557,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
 		return nil, 0, err
 	}
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.username", username); err != nil {
+	if tx, err = applyLogUsernameFilter(tx, username); err != nil {
 		return nil, 0, err
 	}
 	if tokenName != "" {
@@ -590,6 +595,10 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	}
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		assignDisplayLogIds(logs, startIdx)
+	}
+
+	if err = hydrateMissingLogUsernames(logs); err != nil {
+		return logs, total, err
 	}
 
 	channelIds := types.NewSet[int]()
@@ -633,6 +642,82 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	}
 
 	return logs, total, err
+}
+
+func applyLogUsernameFilter(tx *gorm.DB, username string) (*gorm.DB, error) {
+	if username == "" {
+		return tx, nil
+	}
+
+	condition := "logs.username = ?"
+	args := []interface{}{username}
+	if strings.Contains(username, "%") {
+		likeCondition, pattern, err := buildLogLikeCondition("logs.username", username)
+		if err != nil {
+			return nil, err
+		}
+		condition = likeCondition
+		args = []interface{}{pattern}
+	}
+
+	userIds, err := findUserIdsByUsernameFilter(username)
+	if err != nil {
+		return nil, err
+	}
+	if len(userIds) > 0 {
+		condition = "(" + condition + " OR logs.user_id IN ?)"
+		args = append(args, userIds)
+	}
+	return tx.Where(condition, args...), nil
+}
+
+func findUserIdsByUsernameFilter(username string) ([]int, error) {
+	var userIds []int
+	tx := DB.Model(&User{})
+	if strings.Contains(username, "%") {
+		pattern, err := sanitizeLikePattern(username)
+		if err != nil {
+			return nil, err
+		}
+		tx = tx.Where("username LIKE ? ESCAPE '!'", pattern)
+	} else {
+		tx = tx.Where("username = ?", username)
+	}
+	if err := tx.Pluck("id", &userIds).Error; err != nil {
+		return nil, err
+	}
+	return userIds, nil
+}
+
+func hydrateMissingLogUsernames(logs []*Log) error {
+	userIds := types.NewSet[int]()
+	for _, log := range logs {
+		if log.UserId != 0 && strings.TrimSpace(log.Username) == "" {
+			userIds.Add(log.UserId)
+		}
+	}
+	if userIds.Len() == 0 {
+		return nil
+	}
+
+	var users []struct {
+		Id       int    `gorm:"column:id"`
+		Username string `gorm:"column:username"`
+	}
+	if err := DB.Model(&User{}).Select("id, username").Where("id IN ?", userIds.Items()).Find(&users).Error; err != nil {
+		return err
+	}
+
+	usernameMap := make(map[int]string, len(users))
+	for _, user := range users {
+		usernameMap[user.Id] = user.Username
+	}
+	for i := range logs {
+		if logs[i].Username == "" {
+			logs[i].Username = usernameMap[logs[i].UserId]
+		}
+	}
+	return nil
 }
 
 const logSearchCountLimit = 10000
