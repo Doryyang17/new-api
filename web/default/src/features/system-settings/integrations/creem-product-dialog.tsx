@@ -43,6 +43,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { CreemProduct } from '@/features/wallet/types'
+import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
+import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
 import { safeNumberFieldProps } from '../utils/numeric-field'
 
@@ -50,7 +52,7 @@ const creemProductDialogSchema = z.object({
   name: z.string().min(1, 'Product name is required'),
   productId: z.string().min(1, 'Product ID is required'),
   price: z.number().min(0.01, 'Price must be greater than 0'),
-  quota: z.number().min(1, 'Quota must be at least 1'),
+  quota: z.number().min(0.000001, 'Quota amount must be greater than 0'),
   currency: z.enum(['USD', 'EUR']),
 })
 
@@ -76,6 +78,10 @@ export function CreemProductDialog({
 }: CreemProductDialogProps) {
   const { t } = useTranslation()
   const isEditMode = !!editData
+  const { meta: currencyMeta } = getCurrencyDisplay()
+  const currencyLabel = getCurrencyLabel()
+  const quotaStep = currencyMeta.kind === 'tokens' ? 1 : 0.000001
+  const quotaPlaceholder = currencyMeta.kind === 'tokens' ? '500000' : '1.00'
 
   const form = useForm<CreemProductDialogFormValues>({
     resolver: zodResolver(creemProductDialogSchema),
@@ -90,7 +96,10 @@ export function CreemProductDialog({
 
   useEffect(() => {
     if (editData) {
-      form.reset(editData)
+      form.reset({
+        ...editData,
+        quota: quotaUnitsToDollars(editData.quota),
+      })
     } else {
       form.reset({
         name: '',
@@ -107,7 +116,7 @@ export function CreemProductDialog({
       name: values.name,
       productId: values.productId,
       price: values.price,
-      quota: values.quota,
+      quota: parseQuotaFromDollars(values.quota),
       currency: values.currency,
     }
     onSave(data)
@@ -241,17 +250,20 @@ export function CreemProductDialog({
             name='quota'
             render={({ field }) => (
               <FormItem>
-                <FormLabel>{t('Quota')}</FormLabel>
+                <FormLabel>
+                  {t('Quota')} ({currencyLabel})
+                </FormLabel>
                 <FormControl>
                   <Input
                     type='number'
-                    min={1}
-                    placeholder={t('e.g., 500000')}
+                    min={0}
+                    step={quotaStep}
+                    placeholder={quotaPlaceholder}
                     {...safeNumberFieldProps(field)}
                   />
                 </FormControl>
                 <FormDescription>
-                  {t('Amount of quota to credit to user account.')}
+                  充值成功后写入用户账户的额度金额
                 </FormDescription>
                 <FormMessage />
               </FormItem>

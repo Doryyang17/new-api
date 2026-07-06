@@ -42,6 +42,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
+import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
 import {
   SettingsForm,
@@ -59,6 +61,22 @@ const numericString = z.string().refine((value) => {
   if (!trimmed) return true
   return !Number.isNaN(Number(trimmed)) && Number(trimmed) >= 0
 }, 'Enter a non-negative number or leave empty')
+
+const quotaToDisplayInput = (value: string | number | null | undefined) => {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) return ''
+  const quota = Number(trimmed)
+  if (!Number.isFinite(quota)) return ''
+  return String(quotaUnitsToDollars(quota))
+}
+
+const displayInputToQuota = (value: string) => {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const amount = Number(trimmed)
+  if (!Number.isFinite(amount)) return ''
+  return String(parseQuotaFromDollars(amount))
+}
 
 const monitoringSchema = z.object({
   QuotaRemindThreshold: numericString,
@@ -88,7 +106,7 @@ type MonitoringSettingsSectionProps = {
 const buildFormDefaults = (
   defaults: MonitoringSettingsSectionProps['defaultValues']
 ): MonitoringFormInput => ({
-  QuotaRemindThreshold: defaults.QuotaRemindThreshold ?? '',
+  QuotaRemindThreshold: quotaToDisplayInput(defaults.QuotaRemindThreshold),
   perf_metrics_setting: {
     enabled: defaults['perf_metrics_setting.enabled'],
     flush_interval: defaults['perf_metrics_setting.flush_interval'],
@@ -100,7 +118,7 @@ const buildFormDefaults = (
 const normalizeDefaults = (
   defaults: MonitoringSettingsSectionProps['defaultValues']
 ): FlatMonitoringDefaults => ({
-  QuotaRemindThreshold: (defaults.QuotaRemindThreshold ?? '').trim(),
+  QuotaRemindThreshold: quotaToDisplayInput(defaults.QuotaRemindThreshold),
   'perf_metrics_setting.enabled': defaults['perf_metrics_setting.enabled'],
   'perf_metrics_setting.flush_interval':
     defaults['perf_metrics_setting.flush_interval'],
@@ -127,6 +145,10 @@ export function MonitoringSettingsSection({
 }: MonitoringSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const { meta: currencyMeta } = getCurrencyDisplay()
+  const currencyLabel = getCurrencyLabel()
+  const quotaStep = currencyMeta.kind === 'tokens' ? 1 : 0.000001
+  const quotaPlaceholder = currencyMeta.kind === 'tokens' ? '1000' : '0.01'
   const baselineRef = useRef<FlatMonitoringDefaults>(
     normalizeDefaults(defaultValues)
   )
@@ -168,9 +190,13 @@ export function MonitoringSettingsSection({
     }
 
     for (const key of updates) {
+      const value =
+        key === 'QuotaRemindThreshold'
+          ? displayInputToQuota(normalized[key] as string)
+          : normalized[key]
       await updateOption.mutateAsync({
         key,
-        value: normalized[key],
+        value,
       })
     }
 
@@ -191,18 +217,19 @@ export function MonitoringSettingsSection({
             name='QuotaRemindThreshold'
             render={({ field }) => (
               <FormItem>
-                <FormLabel>{t('Quota reminder (tokens)')}</FormLabel>
+                <FormLabel>额度提醒阈值 ({currencyLabel})</FormLabel>
                 <FormControl>
                   <Input
                     type='number'
                     min={0}
-                    step={1}
+                    step={quotaStep}
+                    placeholder={quotaPlaceholder}
                     value={field.value}
                     onChange={(event) => field.onChange(event.target.value)}
                   />
                 </FormControl>
                 <FormDescription>
-                  {t('Send email alerts when a user falls below this quota')}
+                  用户剩余额度低于该金额时发送邮件提醒
                 </FormDescription>
                 <FormMessage />
               </FormItem>

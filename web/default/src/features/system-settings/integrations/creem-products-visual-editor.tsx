@@ -24,10 +24,8 @@ import { StaticDataTable } from '@/components/data-table/static/static-data-tabl
 import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  formatCreemPrice,
-  formatQuotaShort,
-} from '@/features/wallet/lib/format'
+import { formatCreemPrice } from '@/features/wallet/lib/format'
+import { formatQuota } from '@/lib/format'
 
 import { safeJsonParseWithValidation } from '../utils/json-parser'
 import { isArray } from '../utils/json-validators'
@@ -213,7 +211,7 @@ export function CreemProductsVisualEditor({
                 header: t('Quota'),
                 cell: (product) => (
                   <span className='font-mono text-sm'>
-                    {formatQuotaShort(product.quota)}
+                    {formatQuota(product.quota)}
                   </span>
                 ),
               },
@@ -287,7 +285,7 @@ export function CreemProductsVisualEditor({
                       {t('Quota')}:
                     </span>
                     <span className='font-mono'>
-                      {formatQuotaShort(product.quota)}
+                      {formatQuota(product.quota)}
                     </span>
                   </div>
                 </div>

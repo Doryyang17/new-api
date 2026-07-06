@@ -46,6 +46,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { confirmPaymentCompliance } from '../api'
@@ -92,6 +93,76 @@ function isHttpOriginUrl(value: string) {
   } catch {
     return false
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function mapCreemProductQuota(
+  value: string,
+  convertQuota: (quota: number) => number
+) {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (!Array.isArray(parsed)) return value
+
+    const converted = parsed.map((item) => {
+      if (!isRecord(item) || typeof item.quota !== 'number') return item
+      return {
+        ...item,
+        quota: convertQuota(item.quota),
+      }
+    })
+    return JSON.stringify(converted, null, 2)
+  } catch {
+    return value
+  }
+}
+
+function formatCreemProductsForDisplay(value: string) {
+  return mapCreemProductQuota(value, quotaUnitsToDollars)
+}
+
+function formatCreemProductsForSave(value: string) {
+  return mapCreemProductQuota(value, parseQuotaFromDollars)
+}
+
+type CreemProductsJsonEditorProps = {
+  value: string
+  name: string
+  onChange: (value: string) => void
+  onBlur: () => void
+}
+
+function CreemProductsJsonEditor({
+  value,
+  name,
+  onChange,
+  onBlur,
+}: CreemProductsJsonEditorProps) {
+  const [draft, setDraft] = React.useState<string | null>(null)
+
+  return (
+    <Textarea
+      name={name}
+      rows={4}
+      placeholder='[]'
+      value={draft ?? formatCreemProductsForDisplay(value)}
+      onChange={(event) => {
+        const next = event.target.value
+        setDraft(next)
+        onChange(formatCreemProductsForSave(next))
+      }}
+      onBlur={() => {
+        setDraft(null)
+        onBlur()
+      }}
+    />
+  )
 }
 
 const paymentSchema = z.object({
@@ -1568,13 +1639,11 @@ export function PaymentSettingsSection({
                             onChange={field.onChange}
                           />
                         ) : (
-                          <Textarea
-                            rows={4}
-                            placeholder='[{"name":"Basic","productId":"prod_xxx","price":10,"quota":500000,"currency":"USD"}]'
-                            {...field}
-                            onChange={(event) =>
-                              field.onChange(event.target.value)
-                            }
+                          <CreemProductsJsonEditor
+                            value={field.value}
+                            name={field.name}
+                            onChange={field.onChange}
+                            onBlur={field.onBlur}
                           />
                         )}
                       </FormControl>
