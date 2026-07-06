@@ -34,12 +34,13 @@ import {
   Wand2,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { type Resolver, type UseFormReturn, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import * as z from 'zod'
 
+import { CopyButton } from '@/components/copy-button'
 import { Dialog } from '@/components/dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -1434,6 +1435,7 @@ function PromptFilterLogsPanel() {
 
 function PromptFilterLogRow(props: { log: PromptFilterLog }) {
   const { t } = useTranslation()
+  const previewText = promptFilterLogPreviewText(props.log)
   return (
     <TableRow>
       <TableCell>
@@ -1470,9 +1472,220 @@ function PromptFilterLogRow(props: { log: PromptFilterLog }) {
         {props.log.error_code || '-'}
       </TableCell>
       <TableCell className='max-w-[34rem] whitespace-normal'>
-        <div className='line-clamp-2'>{props.log.text_preview || '-'}</div>
+        <div className='space-y-1.5'>
+          <div className='line-clamp-2'>{previewText || '-'}</div>
+          <PromptFilterLogDetailsDialog log={props.log} />
+        </div>
       </TableCell>
     </TableRow>
+  )
+}
+
+function PromptFilterLogDetailsDialog(props: { log: PromptFilterLog }) {
+  const { t } = useTranslation()
+  const fullText = promptFilterLogFullText(props.log)
+  const hasFullText = promptFilterLogHasFullText(props.log)
+
+  return (
+    <Dialog
+      title='触发日志详情'
+      description='查看完整请求文本、全部命中项和排查字段。'
+      trigger={
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='text-muted-foreground h-6 px-1.5'
+          aria-label={`查看 ${formatTimestampToDate(props.log.created_at)} 触发日志完整信息`}
+        >
+          <Eye data-icon='inline-start' />
+          <span>查看完整</span>
+        </Button>
+      }
+      contentClassName='sm:max-w-5xl'
+      bodyClassName='space-y-5'
+    >
+      <div className='flex flex-wrap items-center gap-2'>
+        <Badge
+          variant={props.log.action === 'block' ? 'destructive' : 'outline'}
+        >
+          {t(actionLabel(props.log.action))}
+        </Badge>
+        <Badge variant='secondary'>{t(sourceLabel(props.log.source))}</Badge>
+        {props.log.strict_hit ? (
+          <Badge variant='destructive'>严格命中</Badge>
+        ) : null}
+        {props.log.reviewed ? (
+          <Badge variant={props.log.review_flagged ? 'destructive' : 'outline'}>
+            {props.log.review_flagged ? '复核标记' : '已复核'}
+          </Badge>
+        ) : null}
+      </div>
+
+      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
+        <PromptFilterLogDetailField
+          label='时间'
+          value={formatTimestampToDate(props.log.created_at)}
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='触发用户'
+          value={promptFilterLogUserLabel(props.log)}
+        />
+        <PromptFilterLogDetailField
+          label='来源'
+          value={t(sourceLabel(props.log.source))}
+        />
+        <PromptFilterLogDetailField
+          label='端点'
+          value={props.log.endpoint}
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='模型'
+          value={props.log.model || '-'}
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='API 密钥'
+          value={promptFilterLogApiKeyLabel(props.log)}
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='分组'
+          value={props.log.group || '-'}
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='渠道'
+          value={promptFilterLogChannelLabel(props.log)}
+        />
+        <PromptFilterLogDetailField
+          label='客户端 IP'
+          value={props.log.client_ip || '-'}
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='请求 ID'
+          value={props.log.request_id || '-'}
+          mono
+          wide
+        />
+        <PromptFilterLogDetailField
+          label='模式'
+          value={t(modeLabel(props.log.mode))}
+        />
+        <PromptFilterLogDetailField
+          label='得分'
+          value={`${props.log.score}/${props.log.threshold}`}
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='原始得分'
+          value={String(props.log.raw_score)}
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='状态码'
+          value={
+            props.log.status_code > 0 ? String(props.log.status_code) : '-'
+          }
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='业务错误码'
+          value={props.log.error_code || '-'}
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='提取字符数'
+          value={String(props.log.extracted_chars)}
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='复核模型'
+          value={props.log.review_model || '-'}
+          mono
+        />
+        <PromptFilterLogDetailField
+          label='复核错误'
+          value={props.log.review_error || '-'}
+          wide
+        />
+        <PromptFilterLogDetailField
+          label='返回消息'
+          value={props.log.prompt_filter_msg || '-'}
+          wide
+        />
+      </div>
+
+      <div className='space-y-2'>
+        <div className='flex flex-wrap items-start justify-between gap-3'>
+          <div>
+            <h4 className='font-medium'>完整预览</h4>
+            <p className='text-muted-foreground text-xs'>
+              {hasFullText
+                ? '显示日志保存的完整可排查文本，敏感片段已按后端规则脱敏。'
+                : '当前日志未返回完整文本，只能显示保存的预览片段。'}
+            </p>
+          </div>
+          <CopyButton
+            value={fullText}
+            variant='outline'
+            size='sm'
+            disabled={!fullText}
+            tooltip='复制完整预览'
+            successTooltip='已复制完整预览'
+          >
+            <span>复制</span>
+          </CopyButton>
+        </div>
+        <Textarea
+          readOnly
+          value={fullText || '-'}
+          className='min-h-72 resize-y font-mono text-xs leading-relaxed'
+        />
+      </div>
+
+      <div className='space-y-2'>
+        <h4 className='font-medium'>全部命中项</h4>
+        {props.log.matched.length > 0 ? (
+          <div className='max-h-72 space-y-3 overflow-y-auto rounded-lg border p-3'>
+            {props.log.matched.map((match) => (
+              <PromptFilterMatchItem
+                key={promptFilterMatchKey(match)}
+                match={match}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className='text-muted-foreground rounded-lg border border-dashed p-3 text-sm'>
+            没有记录命中项。
+          </div>
+        )}
+      </div>
+    </Dialog>
+  )
+}
+
+function PromptFilterLogDetailField(props: {
+  label: string
+  value: ReactNode
+  mono?: boolean
+  wide?: boolean
+}) {
+  const className = props.wide
+    ? 'min-w-0 rounded-md border bg-muted/20 px-3 py-2 sm:col-span-2'
+    : 'min-w-0 rounded-md border bg-muted/20 px-3 py-2'
+  const valueClassName = props.mono
+    ? 'mt-1 break-all font-mono text-sm'
+    : 'mt-1 break-words text-sm'
+
+  return (
+    <div className={className}>
+      <div className='text-muted-foreground text-xs'>{props.label}</div>
+      <div className={valueClassName}>{props.value}</div>
+    </div>
   )
 }
 
@@ -1554,6 +1767,16 @@ function promptFilterMatchTitle(match: PromptFilterMatch) {
   return parts.join('\n')
 }
 
+function promptFilterMatchKey(match: PromptFilterMatch) {
+  return [
+    match.name || 'unknown_rule',
+    promptFilterMatchTerm(match) || 'no_term',
+    match.category || 'no_category',
+    String(match.weight),
+    match.strict ? 'strict' : 'normal',
+  ].join(':')
+}
+
 function promptFilterLogUserLabel(log: PromptFilterLog) {
   if (log.username && log.user_id > 0) {
     return `${log.username} (#${log.user_id})`
@@ -1565,6 +1788,51 @@ function promptFilterLogUserLabel(log: PromptFilterLog) {
     return `#${log.user_id}`
   }
   return '-'
+}
+
+function promptFilterLogApiKeyLabel(log: PromptFilterLog) {
+  if (log.api_key_name && log.api_key_id > 0) {
+    return `${log.api_key_name} (#${log.api_key_id})`
+  }
+  if (log.api_key_name) {
+    return log.api_key_name
+  }
+  if (log.api_key_id > 0) {
+    return `#${log.api_key_id}`
+  }
+  return '-'
+}
+
+function promptFilterLogChannelLabel(log: PromptFilterLog) {
+  if (log.channel_name && log.channel_id > 0) {
+    return `${log.channel_name} (#${log.channel_id})`
+  }
+  if (log.channel_name) {
+    return log.channel_name
+  }
+  if (log.channel_id > 0) {
+    return `#${log.channel_id}`
+  }
+  return '-'
+}
+
+function promptFilterLogPreviewText(log: PromptFilterLog) {
+  if (log.text_preview.trim()) {
+    return log.text_preview
+  }
+  return log.full_text ?? ''
+}
+
+function promptFilterLogFullText(log: PromptFilterLog) {
+  const fullText = log.full_text ?? ''
+  if (fullText.trim()) {
+    return fullText
+  }
+  return log.text_preview
+}
+
+function promptFilterLogHasFullText(log: PromptFilterLog) {
+  return Boolean((log.full_text ?? '').trim())
 }
 
 type PromptFilterRulesPanelProps = {
