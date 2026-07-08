@@ -209,7 +209,7 @@ func promptFilterLogFromRaw(rawLog *Log) *PromptFilterLog {
 		StrictHit:       promptFilterMapBool(other, "strict_hit"),
 		Matched:         promptFilterMapMatches(other),
 		TextPreview:     promptFilterMapString(other, "text_preview", ""),
-		FullText:        promptFilterMapString(other, "full_text", ""),
+		FullText:        promptFilterLogFullText(other),
 		UserId:          rawLog.UserId,
 		Username:        rawLog.Username,
 		TokenId:         rawLog.TokenId,
@@ -243,6 +243,16 @@ func promptFilterMapString(m map[string]interface{}, key string, fallback string
 		return fallback
 	}
 	return value
+}
+
+func promptFilterLogFullText(other map[string]interface{}) string {
+	adminInfo, _ := other["admin_info"].(map[string]interface{})
+	if adminInfo != nil {
+		if fullText := promptFilterMapString(adminInfo, "prompt_filter_full_text", ""); fullText != "" {
+			return fullText
+		}
+	}
+	return promptFilterMapString(other, "full_text", "")
 }
 
 func promptFilterMapInt(m map[string]interface{}, key string) int {

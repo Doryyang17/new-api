@@ -38,6 +38,7 @@ const (
 	defaultPromptFilterHeadScanLength  = 64 * 1024
 	defaultPromptFilterTailScanLength  = 16 * 1024
 	promptFilterMatchTermMaxRunes      = 200
+	promptFilterLogTextPreviewRunes    = 500
 )
 
 type PromptFilterMatch struct {
@@ -1453,7 +1454,7 @@ func RecordPromptFilterRejectLog(c *gin.Context, endpoint string, verdict Prompt
 		"threshold":         verdict.Threshold,
 		"strict_hit":        verdict.StrictHit,
 		"matched":           promptFilterLogMatches(verdict.Matched),
-		"text_preview":      RedactedPromptFilterPreview(verdict.TextPreview, 500),
+		"text_preview":      RedactedPromptFilterPreview(verdict.TextPreview, promptFilterLogTextPreviewRunes),
 		"extracted_chars":   verdict.ExtractedChars,
 		"prompt_filter_msg": verdict.Reason,
 		"mode":              verdict.Mode,
@@ -1463,10 +1464,19 @@ func RecordPromptFilterRejectLog(c *gin.Context, endpoint string, verdict Prompt
 		"review_model":      verdict.ReviewModel,
 		"review_error":      verdict.ReviewError,
 	}
-	if verdict.Action == PromptFilterActionBlock {
-		other["full_text"] = RedactedPromptFilterPreview(verdict.FullText, 32000)
+	if fullText := promptFilterLogFullText(verdict); fullText != "" {
+		other["admin_info"] = map[string]interface{}{
+			"prompt_filter_full_text": fullText,
+		}
 	}
 	model.RecordPromptFilterRejectLog(c, settings.Message, other)
+}
+
+func promptFilterLogFullText(verdict PromptFilterVerdict) string {
+	if verdict.Action == PromptFilterActionAllow || strings.TrimSpace(verdict.FullText) == "" {
+		return ""
+	}
+	return verdict.FullText
 }
 
 func promptFilterLogMatches(matches []PromptFilterMatch) []map[string]interface{} {

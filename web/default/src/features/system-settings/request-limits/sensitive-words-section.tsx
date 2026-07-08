@@ -21,6 +21,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   CheckCircle2,
+  Download,
   Eye,
   FileText,
   Pencil,
@@ -1485,11 +1486,14 @@ function PromptFilterLogDetailsDialog(props: { log: PromptFilterLog }) {
   const { t } = useTranslation()
   const fullText = promptFilterLogFullText(props.log)
   const hasFullText = promptFilterLogHasFullText(props.log)
+  const handleDownload = () => {
+    downloadPromptFilterLog(props.log, t)
+  }
 
   return (
     <Dialog
       title='触发日志详情'
-      description='查看完整请求文本、全部命中项和排查字段。'
+      description='查看完整请求文本、全部命中项和排查字段，必要时下载排查文件。'
       trigger={
         <Button
           type='button'
@@ -1622,23 +1626,35 @@ function PromptFilterLogDetailsDialog(props: { log: PromptFilterLog }) {
       <div className='space-y-2'>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div>
-            <h4 className='font-medium'>完整预览</h4>
+            <h4 className='font-medium'>完整可排查文本</h4>
             <p className='text-muted-foreground text-xs'>
               {hasFullText
-                ? '显示日志保存的完整可排查文本，敏感片段已按后端规则脱敏。'
+                ? '显示日志保存的管理员可见原文，下载后请谨慎流转。'
                 : '当前日志未返回完整文本，只能显示保存的预览片段。'}
             </p>
           </div>
-          <CopyButton
-            value={fullText}
-            variant='outline'
-            size='sm'
-            disabled={!fullText}
-            tooltip='复制完整预览'
-            successTooltip='已复制完整预览'
-          >
-            <span>复制</span>
-          </CopyButton>
+          <div className='flex flex-wrap gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              disabled={!fullText}
+              onClick={handleDownload}
+            >
+              <Download data-icon='inline-start' />
+              <span>下载排查文件</span>
+            </Button>
+            <CopyButton
+              value={fullText}
+              variant='outline'
+              size='sm'
+              disabled={!fullText}
+              tooltip='复制完整文本'
+              successTooltip='已复制完整文本'
+            >
+              <span>复制</span>
+            </CopyButton>
+          </div>
         </div>
         <Textarea
           readOnly
@@ -1833,6 +1849,65 @@ function promptFilterLogFullText(log: PromptFilterLog) {
 
 function promptFilterLogHasFullText(log: PromptFilterLog) {
   return Boolean((log.full_text ?? '').trim())
+}
+
+function downloadPromptFilterLog(
+  log: PromptFilterLog,
+  translate: (key: string) => string
+) {
+  const content = promptFilterLogDownloadContent(log, translate)
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = promptFilterLogDownloadFilename(log)
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+function promptFilterLogDownloadFilename(log: PromptFilterLog) {
+  const timestamp = formatTimestampToDate(log.created_at)
+    .replaceAll(/[^a-zA-Z0-9]+/g, '-')
+    .replaceAll(/^-+|-+$/g, '')
+  return `prompt-filter-log-${log.id}-${timestamp || 'unknown'}.txt`
+}
+
+function promptFilterLogDownloadContent(
+  log: PromptFilterLog,
+  translate: (key: string) => string
+) {
+  const matched =
+    log.matched.length > 0 ? JSON.stringify(log.matched, null, 2) : '[]'
+  return [
+    'Prompt 检查触发日志',
+    '',
+    `时间: ${formatTimestampToDate(log.created_at)}`,
+    `操作: ${translate(actionLabel(log.action))}`,
+    `来源: ${translate(sourceLabel(log.source))}`,
+    `触发用户: ${promptFilterLogUserLabel(log)}`,
+    `端点: ${log.endpoint || '-'}`,
+    `模型: ${log.model || '-'}`,
+    `API 密钥: ${promptFilterLogApiKeyLabel(log)}`,
+    `分组: ${log.group || '-'}`,
+    `渠道: ${promptFilterLogChannelLabel(log)}`,
+    `状态码: ${log.status_code > 0 ? log.status_code : '-'}`,
+    `业务错误码: ${log.error_code || '-'}`,
+    `请求 ID: ${log.request_id || '-'}`,
+    `客户端 IP: ${log.client_ip || '-'}`,
+    `得分: ${log.score}/${log.threshold}`,
+    `原始得分: ${log.raw_score}`,
+    `提取字符数: ${log.extracted_chars}`,
+    `返回消息: ${log.prompt_filter_msg || '-'}`,
+    '说明: 文件包含日志保存的管理员可见原文；历史日志可能只有预览片段。',
+    '',
+    '--- 完整可排查文本 ---',
+    promptFilterLogFullText(log) || '-',
+    '',
+    '--- 全部命中项 ---',
+    matched,
+  ].join('\n')
 }
 
 type PromptFilterRulesPanelProps = {

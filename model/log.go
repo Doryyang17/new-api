@@ -128,6 +128,10 @@ func formatUserLogs(logs []*Log, startIdx int) {
 		var otherMap map[string]interface{}
 		otherMap, _ = common.StrToMap(logs[i].Other)
 		if otherMap != nil {
+			if common.Interface2String(otherMap["reject_reason"]) == "prompt_filter" {
+				delete(otherMap, "full_text")
+				delete(otherMap, "prompt_filter_full_text")
+			}
 			// Remove admin-only debug fields.
 			delete(otherMap, "admin_info")
 			// Remove operation-audit details (operator/route info), admin-only.

@@ -345,6 +345,26 @@ func TestPromptFilterLogMatchesIncludesRedactedMatchedTerm(t *testing.T) {
 	assert.NotContains(t, matches[2], "term")
 }
 
+func TestPromptFilterLogFullTextRecordedForAllTriggerActions(t *testing.T) {
+	fullText := "第一行\nAuthorization: Bearer secret-token\n第二行"
+	for _, action := range []string{
+		PromptFilterActionBlock,
+		PromptFilterActionWarn,
+		PromptFilterActionWatch,
+	} {
+		got := promptFilterLogFullText(PromptFilterVerdict{
+			Action:   action,
+			FullText: fullText,
+		})
+		assert.Equal(t, fullText, got)
+	}
+
+	assert.Empty(t, promptFilterLogFullText(PromptFilterVerdict{
+		Action:   PromptFilterActionAllow,
+		FullText: fullText,
+	}))
+}
+
 func TestInspectPromptTextDoesNotMatchAsciiLexiconInsideLongerWords(t *testing.T) {
 	withPromptFilterSettings(t, nil)
 	lexiconDir := t.TempDir()

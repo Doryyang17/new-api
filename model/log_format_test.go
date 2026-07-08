@@ -33,3 +33,43 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 	// Non-admin billing fields remain visible.
 	require.Contains(t, parsed, "model_price")
 }
+
+func TestFormatUserLogsStripsPromptFilterFullText(t *testing.T) {
+	other := common.MapToJsonStr(map[string]interface{}{
+		"reject_reason":           "prompt_filter",
+		"text_preview":            "[REDACTED] preview",
+		"full_text":               "legacy full prompt secret",
+		"prompt_filter_full_text": "legacy admin prompt secret",
+		"admin_info": map[string]interface{}{
+			"prompt_filter_full_text": "admin prompt secret",
+		},
+	})
+	logs := []*Log{{Other: other}}
+
+	formatUserLogs(logs, 0)
+
+	parsed, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	require.NotContains(t, parsed, "full_text")
+	require.NotContains(t, parsed, "prompt_filter_full_text")
+	require.NotContains(t, parsed, "admin_info")
+	require.Equal(t, "[REDACTED] preview", parsed["text_preview"])
+	require.NotContains(t, logs[0].Other, "secret")
+}
+
+func TestPromptFilterLogFromRawReadsAdminInfoFullText(t *testing.T) {
+	other := common.MapToJsonStr(map[string]interface{}{
+		"reject_reason": "prompt_filter",
+		"text_preview":  "[REDACTED] preview",
+		"full_text":     "legacy redacted preview",
+		"admin_info": map[string]interface{}{
+			"prompt_filter_full_text": "admin original prompt",
+		},
+	})
+
+	log := promptFilterLogFromRaw(&Log{Other: other})
+
+	require.NotNil(t, log)
+	require.Equal(t, "admin original prompt", log.FullText)
+	require.Equal(t, "[REDACTED] preview", log.TextPreview)
+}
