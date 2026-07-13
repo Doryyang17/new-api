@@ -35,7 +35,11 @@ import {
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
-import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
+import {
+  formatQuota,
+  parseQuotaFromDollars,
+  quotaUnitsToDollars,
+} from '@/lib/format'
 
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
@@ -66,6 +70,7 @@ const quotaSchema = z.object({
 })
 
 type QuotaFormValues = z.infer<typeof quotaSchema>
+type QuotaInputValue = number | ''
 
 type QuotaSettingsSectionProps = {
   defaultValues: QuotaFormValues
@@ -86,6 +91,10 @@ const toQuotaUnits = (amount: unknown) => {
   return parseQuotaFromDollars(numericAmount)
 }
 
+function formatQuotaInputValue(value: QuotaInputValue): string {
+  return formatQuota(toQuotaUnits(value))
+}
+
 export function QuotaSettingsSection({
   defaultValues,
   complianceConfirmed = true,
@@ -104,11 +113,10 @@ export function QuotaSettingsSection({
     QuotaForInvitee: toQuotaAmount(defaultValues.QuotaForInvitee),
   }
   const handleNumberChange =
-    (onChange: (value: number | string) => void) =>
+    (onChange: (value: QuotaInputValue) => void) =>
     (event: ChangeEvent<HTMLInputElement>) => {
-      onChange(
-        event.target.value === '' ? '' : event.currentTarget.valueAsNumber
-      )
+      const value = event.currentTarget.valueAsNumber
+      onChange(Number.isNaN(value) ? '' : value)
     }
 
   const { form, handleSubmit, isDirty, isSubmitting } =
@@ -174,7 +182,14 @@ export function QuotaSettingsSection({
                       ref={field.ref}
                     />
                   </FormControl>
-                  <FormDescription>授予新用户的初始额度金额</FormDescription>
+                  <FormDescription>
+                    {t(
+                      'Initial quota given to new users ({{formattedQuota}})',
+                      {
+                        formattedQuota: formatQuotaInputValue(field.value),
+                      }
+                    )}
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -231,7 +246,12 @@ export function QuotaSettingsSection({
                     />
                   </FormControl>
                   <FormDescription>
-                    邀请其他用户后发放给邀请人的额度金额
+                    {t(
+                      'Quota given to users who invite others ({{formattedQuota}})',
+                      {
+                        formattedQuota: formatQuotaInputValue(field.value),
+                      }
+                    )}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -260,7 +280,9 @@ export function QuotaSettingsSection({
                     />
                   </FormControl>
                   <FormDescription>
-                    使用邀请码注册后发放给被邀请人的额度金额
+                    {t('Quota given to invited users ({{formattedQuota}})', {
+                      formattedQuota: formatQuotaInputValue(field.value),
+                    })}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
