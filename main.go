@@ -331,6 +331,12 @@ func InitResources() error {
 
 	// Initialize options, should after model.InitDB()
 	model.InitOptionMap()
+	if common.IsMasterNode {
+		if err = model.BackfillTopUpCreditedQuota(); err != nil {
+			common.FatalLog("failed to backfill topup credited quota: " + err.Error())
+			return err
+		}
+	}
 
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()

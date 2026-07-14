@@ -410,11 +410,23 @@ func GetUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
 		return
 	}
+	totalTopUpQuota, err := model.GetUserTopUpQuota(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	user.AdminPermissions = authz.Capabilities(user.Id, user.Role)
+	responseData := struct {
+		*model.User
+		TotalTopUpQuota int64 `json:"total_topup_quota"`
+	}{
+		User:            user,
+		TotalTopUpQuota: totalTopUpQuota,
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    user,
+		"data":    responseData,
 	})
 	return
 }

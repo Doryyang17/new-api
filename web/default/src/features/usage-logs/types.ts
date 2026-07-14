@@ -397,6 +397,7 @@ export interface UserInfo {
   display_name?: string
   quota: number
   used_quota: number
+  total_topup_quota: number
   request_count: number
   group?: string
   aff_code?: string
