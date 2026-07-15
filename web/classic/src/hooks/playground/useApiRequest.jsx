@@ -190,6 +190,9 @@ export const useApiRequest = (
           headers: {
             'Content-Type': 'application/json',
             'New-Api-User': getUserIdFromLocalStorage(),
+            ...(payload.group
+              ? { 'New-Api-Playground-Group': payload.group }
+              : {}),
           },
           body: JSON.stringify(payload),
         });
@@ -317,6 +320,9 @@ export const useApiRequest = (
         headers: {
           'Content-Type': 'application/json',
           'New-Api-User': getUserIdFromLocalStorage(),
+          ...(payload.group
+            ? { 'New-Api-Playground-Group': payload.group }
+            : {}),
         },
         method: 'POST',
         payload: JSON.stringify(payload),

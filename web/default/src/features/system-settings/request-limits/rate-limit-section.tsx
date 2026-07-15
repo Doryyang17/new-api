@@ -69,7 +69,7 @@ const isValidJSON = (value: string | undefined) => {
 const createRateLimitSchema = (t: (key: string) => string) =>
   z.object({
     ModelRequestRateLimitEnabled: z.boolean(),
-    ModelRequestRateLimitDurationMinutes: z.number().min(0),
+    ModelRequestRateLimitDurationMinutes: z.number().min(1),
     ModelRequestRateLimitCount: z.number().min(0).max(100000000),
     ModelRequestRateLimitSuccessCount: z.number().min(1).max(100000000),
     ModelRequestRateLimitGroup: z
@@ -157,11 +157,13 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                     <div className='flex items-center gap-2'>
                       <Input
                         type='number'
-                        min={0}
+                        min={1}
                         step={1}
                         {...field}
                         onChange={(e) =>
-                          field.onChange(parseInt(e.target.value) || 0)
+                          field.onChange(
+                            Number.parseInt(e.target.value, 10) || 1
+                          )
                         }
                       />
                       <span className='text-muted-foreground text-sm'>
@@ -192,7 +194,9 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                         step={1}
                         {...field}
                         onChange={(e) =>
-                          field.onChange(parseInt(e.target.value) || 0)
+                          field.onChange(
+                            Number.parseInt(e.target.value, 10) || 0
+                          )
                         }
                       />
                       <span className='text-muted-foreground text-sm'>
@@ -223,7 +227,9 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                         step={1}
                         {...field}
                         onChange={(e) =>
-                          field.onChange(parseInt(e.target.value) || 1)
+                          field.onChange(
+                            Number.parseInt(e.target.value, 10) || 1
+                          )
                         }
                       />
                       <span className='text-muted-foreground text-sm'>

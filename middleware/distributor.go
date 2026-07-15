@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -27,6 +28,79 @@ import (
 type ModelRequest struct {
 	Model string `json:"model"`
 	Group string `json:"group,omitempty"`
+}
+
+const playgroundGroupPreResolveMaxBytes = 64 << 10
+
+const (
+	playgroundGroupHeader             = "New-Api-Playground-Group"
+	playgroundPreResolvedGroupContext = "playground_pre_resolved_group"
+)
+
+func ResolvePlaygroundGroup() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request == nil || c.Request.Body == nil {
+			c.Next()
+			return
+		}
+
+		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+		headerGroup := strings.TrimSpace(c.GetHeader(playgroundGroupHeader))
+		if headerGroup != "" && playgroundGroupAllowed(usingGroup, headerGroup) {
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, headerGroup)
+			common.SetContextKey(c, constant.ContextKeyTokenGroup, headerGroup)
+			c.Set(playgroundPreResolvedGroupContext, headerGroup)
+			c.Next()
+			return
+		}
+
+		originalBody := c.Request.Body
+		prefix, err := io.ReadAll(io.LimitReader(originalBody, playgroundGroupPreResolveMaxBytes+1))
+		c.Request.Body = &readCloser{
+			Reader:  io.MultiReader(bytes.NewReader(prefix), originalBody),
+			closeFn: originalBody.Close,
+		}
+		if err != nil || len(prefix) > playgroundGroupPreResolveMaxBytes {
+			c.Next()
+			return
+		}
+
+		playgroundRequest := &dto.PlayGroundRequest{}
+		if err := common.Unmarshal(prefix, playgroundRequest); err == nil {
+			if playgroundGroupAllowed(usingGroup, playgroundRequest.Group) && playgroundRequest.Group != "" {
+				common.SetContextKey(c, constant.ContextKeyUsingGroup, playgroundRequest.Group)
+				common.SetContextKey(c, constant.ContextKeyTokenGroup, playgroundRequest.Group)
+				c.Set(playgroundPreResolvedGroupContext, playgroundRequest.Group)
+			}
+		}
+		c.Next()
+	}
+}
+
+func playgroundGroupAllowed(usingGroup string, requestedGroup string) bool {
+	return requestedGroup == "" || requestedGroup == usingGroup || service.GroupInUserUsableGroups(usingGroup, requestedGroup)
+}
+
+func applyPlaygroundGroup(c *gin.Context, usingGroup string, requestedGroup string) (string, bool) {
+	if preResolvedGroup := c.GetString(playgroundPreResolvedGroupContext); preResolvedGroup != "" {
+		if requestedGroup != "" && requestedGroup != preResolvedGroup {
+			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidPlayground, map[string]any{
+				"Error": "请求头分组与请求体分组不一致",
+			}))
+			return "", false
+		}
+		requestedGroup = preResolvedGroup
+	}
+	if requestedGroup == "" {
+		return usingGroup, true
+	}
+	if !playgroundGroupAllowed(usingGroup, requestedGroup) {
+		abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
+		return "", false
+	}
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, requestedGroup)
+	common.SetContextKey(c, constant.ContextKeyTokenGroup, requestedGroup)
+	return requestedGroup, true
 }
 
 func Distribute() func(c *gin.Context) {
@@ -85,19 +159,10 @@ func Distribute() func(c *gin.Context) {
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 				// check path is /pg/chat/completions
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
-					playgroundRequest := &dto.PlayGroundRequest{}
-					err = common.UnmarshalBodyReusable(c, playgroundRequest)
-					if err != nil {
-						abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidPlayground, map[string]any{"Error": err.Error()}))
+					var ok bool
+					usingGroup, ok = applyPlaygroundGroup(c, usingGroup, modelRequest.Group)
+					if !ok {
 						return
-					}
-					if playgroundRequest.Group != "" {
-						if !service.GroupInUserUsableGroups(usingGroup, playgroundRequest.Group) && playgroundRequest.Group != usingGroup {
-							abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
-							return
-						}
-						usingGroup = playgroundRequest.Group
-						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 					}
 				}
 
@@ -218,8 +283,12 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 		return nil, errors.New("invalid JSON request body")
 	}
 
-	values := gjson.GetManyBytes(requestBody, "model", "group")
-	model, err := getJSONStringValue(values[0], "model")
+	modelField := "model"
+	if strings.HasPrefix(c.Request.URL.Path, "/jimeng") {
+		modelField = "req_key"
+	}
+	values := gjson.GetManyBytes(requestBody, modelField, "group")
+	model, err := getJSONStringValue(values[0], modelField)
 	if err != nil {
 		return nil, err
 	}

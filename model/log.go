@@ -403,6 +403,46 @@ func RecordPromptFilterRejectLog(c *gin.Context, content string, other map[strin
 	)
 }
 
+func RecordRequestGuardLog(c *gin.Context, content string, reason string, other map[string]interface{}, blocked bool) {
+	if other == nil {
+		other = map[string]interface{}{}
+	}
+	userId := c.GetInt("id")
+	tokenId := c.GetInt("token_id")
+	tokenName := c.GetString("token_name")
+	other["risk_reason"] = reason
+	if blocked {
+		other["reject_reason"] = reason
+	} else {
+		adminInfo, ok := other["admin_info"].(map[string]interface{})
+		if !ok || adminInfo == nil {
+			adminInfo = map[string]interface{}{}
+			other["admin_info"] = adminInfo
+		}
+		adminInfo["user_id"] = userId
+		adminInfo["token_id"] = tokenId
+		if tokenName != "" {
+			adminInfo["token_name"] = tokenName
+		}
+		userId = 0
+		tokenId = 0
+		tokenName = ""
+	}
+	RecordErrorLog(
+		c,
+		userId,
+		common.GetContextKeyInt(c, constant.ContextKeyChannelId),
+		common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		tokenName,
+		content,
+		tokenId,
+		0,
+		common.GetContextKeyBool(c, constant.ContextKeyIsStream),
+		common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+		other,
+	)
+}
+
 type RecordConsumeLogParams struct {
 	ChannelId        int                    `json:"channel_id"`
 	PromptTokens     int                    `json:"prompt_tokens"`

@@ -20,7 +20,8 @@ func SetVideoRouter(router *gin.Engine) {
 
 	videoV1Router := router.Group("/v1")
 	videoV1Router.Use(middleware.RouteTag("relay"))
-	videoV1Router.Use(middleware.SystemAvailabilityCheck(), middleware.SystemDailyUsageLimitCheck(), middleware.TokenAuth(), middleware.Distribute(), middleware.PromptComplianceCheck("video"))
+	videoV1Router.Use(middleware.SystemAvailabilityCheck(), middleware.SystemDailyUsageLimitCheck(), middleware.TokenAuth())
+	videoV1Router.Use(middleware.RequestConcurrencyGuard(), middleware.RequestRiskGuard(), middleware.ModelRequestRateLimit(), middleware.Distribute(), middleware.PromptComplianceCheck("video"))
 	{
 		videoV1Router.POST("/video/generations", controller.RelayTask)
 		videoV1Router.GET("/video/generations/:task_id", controller.RelayTaskFetch)
@@ -35,7 +36,8 @@ func SetVideoRouter(router *gin.Engine) {
 
 	klingV1Router := router.Group("/kling/v1")
 	klingV1Router.Use(middleware.RouteTag("relay"))
-	klingV1Router.Use(middleware.SystemAvailabilityCheck(), middleware.SystemDailyUsageLimitCheck(), middleware.TokenAuth(), middleware.KlingRequestConvert(), middleware.Distribute(), middleware.PromptComplianceCheck("video"))
+	klingV1Router.Use(middleware.SystemAvailabilityCheck(), middleware.SystemDailyUsageLimitCheck(), middleware.TokenAuth())
+	klingV1Router.Use(middleware.RequestConcurrencyGuard(), middleware.KlingRequestConvert(), middleware.RequestRiskGuard(), middleware.ModelRequestRateLimit(), middleware.Distribute(), middleware.PromptComplianceCheck("video"))
 	{
 		klingV1Router.POST("/videos/text2video", controller.RelayTask)
 		klingV1Router.POST("/videos/image2video", controller.RelayTask)
@@ -46,7 +48,8 @@ func SetVideoRouter(router *gin.Engine) {
 	// Jimeng official API routes - direct mapping to official API format
 	jimengOfficialGroup := router.Group("jimeng")
 	jimengOfficialGroup.Use(middleware.RouteTag("relay"))
-	jimengOfficialGroup.Use(middleware.SystemAvailabilityCheck(), middleware.SystemDailyUsageLimitCheck(), middleware.TokenAuth(), middleware.JimengRequestConvert(), middleware.Distribute(), middleware.PromptComplianceCheck("video"))
+	jimengOfficialGroup.Use(middleware.SystemAvailabilityCheck(), middleware.SystemDailyUsageLimitCheck(), middleware.TokenAuth())
+	jimengOfficialGroup.Use(middleware.RequestConcurrencyGuard(), middleware.RequestRiskGuard(), middleware.ModelRequestRateLimit(), middleware.JimengRequestConvert(), middleware.Distribute(), middleware.PromptComplianceCheck("video"))
 	{
 		// Maps to: /?Action=CVSync2AsyncSubmitTask&Version=2022-08-31 and /?Action=CVSync2AsyncGetResult&Version=2022-08-31
 		jimengOfficialGroup.POST("/", controller.RelayTask)

@@ -310,6 +310,8 @@ docker run --name new-api -d --restart always \
 | `CRYPTO_SECRET` | Encryption secret (required for Redis) | - |
 | `SQL_DSN` | Database connection string | - |
 | `REDIS_CONN_STRING` | Redis connection string | - |
+| `TRUSTED_PROXIES` | Trusted reverse proxy addresses or CIDRs, comma-separated; use `none` for direct connections. IP-based request-risk enforcement stays disabled when unset | - |
+| `TRUSTED_IP_HEADERS` | Client-IP headers accepted from trusted proxies, comma-separated, for example `CF-Connecting-IP,X-Forwarded-For` | Gin defaults |
 | `STREAMING_TIMEOUT` | Streaming timeout (seconds) | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | Max per-line buffer (MB) for the stream scanner; increase when upstream sends huge image/base64 payloads | `64` |
 | `MAX_REQUEST_BODY_MB` | Max request body size (MB, counted **after decompression**; prevents huge requests/zip bombs from exhausting memory). Exceeding it returns `413` | `32` |

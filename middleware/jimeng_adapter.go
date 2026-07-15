@@ -12,6 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const jimengGetResultAction = "CVSync2AsyncGetResult"
+
 func JimengRequestConvert() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		action := c.Query("Action")
@@ -51,7 +53,7 @@ func JimengRequestConvert() func(c *gin.Context) {
 
 		c.Request.URL.Path = "/v1/video/generations"
 
-		if action == "CVSync2AsyncGetResult" {
+		if action == jimengGetResultAction {
 			taskId, ok := originalReq["task_id"].(string)
 			if !ok || taskId == "" {
 				abortWithOpenAiMessage(c, http.StatusBadRequest, "task_id is required for CVSync2AsyncGetResult")

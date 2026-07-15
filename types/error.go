@@ -61,11 +61,13 @@ const (
 	ErrorCodeChannelResponseTimeExceeded  ErrorCode = "channel:response_time_exceeded"
 
 	// client request error
-	ErrorCodeReadRequestBodyFailed    ErrorCode = "read_request_body_failed"
-	ErrorCodeConvertRequestFailed     ErrorCode = "convert_request_failed"
-	ErrorCodeAccessDenied             ErrorCode = "access_denied"
-	ErrorCodeSystemCurfew             ErrorCode = "system_curfew"
-	ErrorCodeSystemDailyUsageExceeded ErrorCode = "system_daily_usage_exceeded"
+	ErrorCodeReadRequestBodyFailed     ErrorCode = "read_request_body_failed"
+	ErrorCodeConvertRequestFailed      ErrorCode = "convert_request_failed"
+	ErrorCodeAccessDenied              ErrorCode = "access_denied"
+	ErrorCodeSystemCurfew              ErrorCode = "system_curfew"
+	ErrorCodeSystemDailyUsageExceeded  ErrorCode = "system_daily_usage_exceeded"
+	ErrorCodeRequestProbeRateLimited   ErrorCode = "request_probe_rate_limited"
+	ErrorCodeRequestConcurrencyLimited ErrorCode = "request_concurrency_limited"
 
 	// request error
 	ErrorCodeBadRequestBody ErrorCode = "bad_request_body"

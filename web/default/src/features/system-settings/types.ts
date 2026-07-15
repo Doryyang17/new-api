@@ -39,6 +39,13 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type UpdateRequestRiskOptionsRequest = {
+  updates: Array<{
+    key: string
+    value: string
+  }>
+}
+
 export type PromptFilterMode = 'block' | 'warn' | 'monitor'
 
 export type PromptFilterMatch = {
@@ -561,6 +568,16 @@ export type SecuritySettings = {
   ModelRequestRateLimitSuccessCount: number
   ModelRequestRateLimitDurationMinutes: number
   ModelRequestRateLimitGroup: string
+  'request_risk_setting.enabled': boolean
+  'request_risk_setting.mode': 'observe' | 'enforce'
+  'request_risk_setting.log_matches': boolean
+  'request_risk_setting.medium_cooldown_seconds': number
+  'request_risk_setting.token_block_seconds': number
+  'request_risk_setting.user_block_seconds': number
+  'request_risk_setting.ip_block_seconds': number
+  'request_risk_setting.user_concurrency_limit': number
+  'request_risk_setting.token_concurrency_limit': number
+  'request_risk_setting.group_whitelist': string[]
   CheckSensitiveEnabled: boolean
   CheckSensitiveOnPromptEnabled: boolean
   SensitiveWords: string

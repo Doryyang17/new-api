@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -117,6 +118,67 @@ func GetOptions(c *gin.Context) {
 type OptionUpdateRequest struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`
+}
+
+type requestRiskOptionUpdate struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type requestRiskOptionsUpdateRequest struct {
+	Updates []requestRiskOptionUpdate `json:"updates"`
+}
+
+func UpdateRequestRiskOptions(c *gin.Context) {
+	var request requestRiskOptionsUpdateRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil || len(request.Updates) == 0 || len(request.Updates) > 10 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的参数",
+		})
+		return
+	}
+
+	values := make(map[string]string, len(request.Updates))
+	keys := make([]string, 0, len(request.Updates))
+	for _, update := range request.Updates {
+		if !strings.HasPrefix(update.Key, "request_risk_setting.") {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "无效的参数",
+			})
+			return
+		}
+		if _, duplicated := values[update.Key]; duplicated {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "配置项重复",
+			})
+			return
+		}
+		if err := system_setting.ValidateRequestRiskOption(update.Key, update.Value); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		values[update.Key] = update.Value
+		keys = append(keys, update.Key)
+	}
+	if err := model.UpdateOptionsBulk(values); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	sort.Strings(keys)
+	recordManageAudit(c, "option.update", map[string]interface{}{
+		"key": strings.Join(keys, ","),
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+	})
 }
 
 func UpdateOption(c *gin.Context) {
@@ -279,6 +341,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "ModelRequestRateLimitDurationMinutes":
+		duration, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || duration < 1 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "rate limit duration must be at least 1 minute",
+			})
+			return
+		}
 	case "AutomaticDisableStatusCodes":
 		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
 		if err != nil {
@@ -349,6 +420,13 @@ func UpdateOption(c *gin.Context) {
 		return
 	}
 	if err := system_setting.ValidatePromptFilterOption(option.Key, option.Value.(string)); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	if err := system_setting.ValidateRequestRiskOption(option.Key, option.Value.(string)); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),

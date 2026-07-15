@@ -21,7 +21,11 @@ import { SSE } from 'sse.js'
 
 import { getCommonHeaders } from '@/lib/api'
 
-import { API_ENDPOINTS, ERROR_MESSAGES } from '../constants'
+import {
+  API_ENDPOINTS,
+  ERROR_MESSAGES,
+  PLAYGROUND_GROUP_HEADER,
+} from '../constants'
 import {
   getStreamReadyStateError,
   isStreamClosedReadyState,
@@ -59,7 +63,12 @@ export function useStreamRequest() {
       sseSourceRef.current?.close()
 
       const source = new SSE(API_ENDPOINTS.CHAT_COMPLETIONS, {
-        headers: getCommonHeaders(),
+        headers: {
+          ...getCommonHeaders(),
+          ...(payload.group
+            ? { [PLAYGROUND_GROUP_HEADER]: payload.group }
+            : {}),
+        },
         method: 'POST',
         payload: JSON.stringify(payload),
       })

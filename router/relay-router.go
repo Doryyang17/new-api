@@ -64,7 +64,12 @@ func SetRelayRouter(router *gin.Engine) {
 	playgroundRouter.Use(middleware.SystemAvailabilityCheck())
 	playgroundRouter.Use(middleware.SystemDailyUsageLimitCheck())
 	playgroundRouter.Use(middleware.SystemPerformanceCheck())
-	playgroundRouter.Use(middleware.UserAuth(), middleware.Distribute())
+	playgroundRouter.Use(middleware.UserAuth())
+	playgroundRouter.Use(middleware.ResolvePlaygroundGroup())
+	playgroundRouter.Use(middleware.RequestConcurrencyGuard())
+	playgroundRouter.Use(middleware.RequestRiskGuard())
+	playgroundRouter.Use(middleware.Distribute())
+	playgroundRouter.Use(middleware.ModelRequestRateLimit())
 	playgroundRouter.Use(middleware.PromptComplianceCheck("chat"))
 	{
 		playgroundRouter.POST("/chat/completions", controller.Playground)
@@ -75,6 +80,8 @@ func SetRelayRouter(router *gin.Engine) {
 	relayV1Router.Use(middleware.SystemDailyUsageLimitCheck())
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
+	relayV1Router.Use(middleware.RequestConcurrencyGuard())
+	relayV1Router.Use(middleware.RequestRiskGuard())
 	relayV1Router.Use(middleware.ModelRequestRateLimit())
 	{
 		// WebSocket 路由（统一到 Relay）
@@ -192,7 +199,11 @@ func SetRelayRouter(router *gin.Engine) {
 	relaySunoRouter.Use(middleware.SystemAvailabilityCheck())
 	relaySunoRouter.Use(middleware.SystemDailyUsageLimitCheck())
 	relaySunoRouter.Use(middleware.SystemPerformanceCheck())
-	relaySunoRouter.Use(middleware.TokenAuth(), middleware.Distribute())
+	relaySunoRouter.Use(middleware.TokenAuth())
+	relaySunoRouter.Use(middleware.RequestConcurrencyGuard())
+	relaySunoRouter.Use(middleware.RequestRiskGuard())
+	relaySunoRouter.Use(middleware.ModelRequestRateLimit())
+	relaySunoRouter.Use(middleware.Distribute())
 	relaySunoRouter.Use(middleware.PromptComplianceCheck("suno"))
 	{
 		relaySunoRouter.POST("/submit/:action", controller.RelayTask)
@@ -206,6 +217,8 @@ func SetRelayRouter(router *gin.Engine) {
 	relayGeminiRouter.Use(middleware.SystemDailyUsageLimitCheck())
 	relayGeminiRouter.Use(middleware.SystemPerformanceCheck())
 	relayGeminiRouter.Use(middleware.TokenAuth())
+	relayGeminiRouter.Use(middleware.RequestConcurrencyGuard())
+	relayGeminiRouter.Use(middleware.RequestRiskGuard())
 	relayGeminiRouter.Use(middleware.ModelRequestRateLimit())
 	relayGeminiRouter.Use(middleware.Distribute())
 	relayGeminiRouter.Use(middleware.PromptComplianceCheck("gemini"))
@@ -219,7 +232,11 @@ func SetRelayRouter(router *gin.Engine) {
 
 func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {
 	relayMjRouter.GET("/image/:id", relay.RelayMidjourneyImage)
-	relayMjRouter.Use(middleware.TokenAuth(), middleware.Distribute())
+	relayMjRouter.Use(middleware.TokenAuth())
+	relayMjRouter.Use(middleware.RequestConcurrencyGuard())
+	relayMjRouter.Use(middleware.RequestRiskGuard())
+	relayMjRouter.Use(middleware.ModelRequestRateLimit())
+	relayMjRouter.Use(middleware.Distribute())
 	relayMjRouter.Use(middleware.PromptComplianceCheck("midjourney"))
 	{
 		relayMjRouter.POST("/submit/action", controller.RelayMidjourney)

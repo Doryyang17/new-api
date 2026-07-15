@@ -317,6 +317,8 @@ docker run --name new-api -d --restart always \
 | `CRYPTO_SECRET` | 加密密钥（Redis 必须）                                               | - |
 | `SQL_DSN` | 数据库连接字符串                                                     | - |
 | `REDIS_CONN_STRING` | Redis 连接字符串                                                  | - |
+| `TRUSTED_PROXIES` | 可信反向代理地址或 CIDR，多个使用英文逗号分隔；直连部署使用 `none`。未配置时不会启用基于 IP 的请求风险限制 | - |
+| `TRUSTED_IP_HEADERS` | 从可信代理读取真实客户端 IP 的 Header，多个使用英文逗号分隔，例如 `CF-Connecting-IP,X-Forwarded-For` | Gin 默认值 |
 | `STREAMING_TIMEOUT` | 流式超时时间（秒）                                                    | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | 流式扫描器单行最大缓冲（MB），图像生成等超大 `data:` 片段（如 4K 图片 base64）需适当调大 | `64` |
 | `MAX_REQUEST_BODY_MB` | 请求体最大大小（MB，**解压后**计；防止超大请求/zip bomb 导致内存暴涨），超过将返回 `413` | `32` |

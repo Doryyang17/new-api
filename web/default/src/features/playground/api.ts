@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import { API_ENDPOINTS } from './constants'
+import { API_ENDPOINTS, PLAYGROUND_GROUP_HEADER } from './constants'
 import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
@@ -35,6 +35,9 @@ export async function sendChatCompletion(
 ): Promise<ChatCompletionResponse> {
   const res = await api.post(API_ENDPOINTS.CHAT_COMPLETIONS, payload, {
     signal,
+    headers: payload.group
+      ? { [PLAYGROUND_GROUP_HEADER]: payload.group }
+      : undefined,
     skipErrorHandler: true,
   } as Record<string, unknown>)
   return res.data

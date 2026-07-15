@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -156,6 +157,7 @@ func recordPromptFilterReject(c *gin.Context, endpoint string, verdict service.P
 }
 
 func writePromptFilterResponse(c *gin.Context, verdict service.PromptFilterVerdict) {
+	common.SetContextKey(c, constant.ContextKeyPromptFilterBlocked, true)
 	c.Header("Cache-Control", "no-store")
 	settings := system_setting.GetPromptFilterSettings()
 	message := settings.Message
