@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -11,6 +10,11 @@ import (
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	availabilityRejectStatusCode = http.StatusForbidden
+	availabilityErrorType        = "permission_error"
 )
 
 func SystemAvailabilityCheck() gin.HandlerFunc {
@@ -47,7 +51,7 @@ func recordAvailabilityReject(c *gin.Context, status system_setting.Availability
 		"availability_enabled":  status.Enabled,
 		"availability_message":  status.Message,
 		"availability_fail_err": status.EvaluationError,
-		"status_code":           http.StatusServiceUnavailable,
+		"status_code":           availabilityRejectStatusCode,
 	}
 	model.RecordAvailabilityRejectLog(c, status.Message, other)
 }
@@ -80,19 +84,16 @@ func populateAvailabilityTokenContext(c *gin.Context) {
 
 func writeAvailabilityResponse(c *gin.Context, status system_setting.AvailabilityStatus) {
 	c.Header("Cache-Control", "no-store")
-	if status.RetryAfterSeconds > 0 {
-		c.Header("Retry-After", strconv.Itoa(status.RetryAfterSeconds))
-	}
 	path := c.Request.URL.Path
 	switch {
 	case strings.HasPrefix(path, "/api"):
-		c.JSON(http.StatusServiceUnavailable, gin.H{
+		c.JSON(availabilityRejectStatusCode, gin.H{
 			"success": false,
 			"message": status.Message,
 			"code":    status.Code,
 		})
 	case strings.HasPrefix(path, "/v1/messages"):
-		c.JSON(http.StatusServiceUnavailable, gin.H{
+		c.JSON(availabilityRejectStatusCode, gin.H{
 			"type": "error",
 			"error": types.ClaudeError{
 				Type:    status.Code,
@@ -100,21 +101,21 @@ func writeAvailabilityResponse(c *gin.Context, status system_setting.Availabilit
 			},
 		})
 	case isMidjourneyAvailabilityPath(path):
-		c.JSON(http.StatusServiceUnavailable, gin.H{
+		c.JSON(availabilityRejectStatusCode, gin.H{
 			"description": status.Message,
-			"type":        "service_unavailable",
+			"type":        availabilityErrorType,
 			"code":        status.Code,
 		})
 	case strings.HasPrefix(path, "/suno") || strings.HasPrefix(path, "/kling/") || strings.HasPrefix(path, "/jimeng"):
-		c.JSON(http.StatusServiceUnavailable, gin.H{
+		c.JSON(availabilityRejectStatusCode, gin.H{
 			"code":    status.Code,
 			"message": status.Message,
 		})
 	default:
-		c.JSON(http.StatusServiceUnavailable, gin.H{
+		c.JSON(availabilityRejectStatusCode, gin.H{
 			"error": types.OpenAIError{
 				Message: status.Message,
-				Type:    "service_unavailable",
+				Type:    availabilityErrorType,
 				Param:   "",
 				Code:    types.ErrorCodeSystemCurfew,
 			},

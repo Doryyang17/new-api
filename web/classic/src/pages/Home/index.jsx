@@ -124,7 +124,7 @@ const CurfewHome = () => (
                   </p>
                 </div>
                 <span className='rounded-full bg-orange-100 px-3 py-1 text-xs font-medium text-orange-700 dark:bg-orange-500/20 dark:text-orange-200'>
-                  503
+                  403
                 </span>
               </div>
               <div className='space-y-3'>
@@ -135,9 +135,17 @@ const CurfewHome = () => (
                 <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
                   {'{'}
                   <div className='pl-4'>
-                    "code": "system_curfew",
+                    "error": {'{'}
                     <br />
-                    "message": "当前处于宵禁状态"
+                    <span className='pl-4'>"message": "当前处于宵禁状态",</span>
+                    <br />
+                    <span className='pl-4'>"type": "permission_error",</span>
+                    <br />
+                    <span className='pl-4'>"param": "",</span>
+                    <br />
+                    <span className='pl-4'>"code": "system_curfew"</span>
+                    <br />
+                    {'}'}
                   </div>
                   {'}'}
                 </div>

@@ -69,7 +69,7 @@ export function CurfewHome() {
                 </p>
               </div>
               <span className='rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-700 dark:text-amber-300'>
-                503
+                403
               </span>
             </div>
             <div className='space-y-3 font-mono text-sm'>
@@ -85,9 +85,17 @@ export function CurfewHome() {
               <div className='border-border/70 bg-muted/60 text-muted-foreground rounded-lg border p-4'>
                 <span>{'{'}</span>
                 <div className='pl-4'>
-                  "code": "system_curfew",
+                  "error": {'{'}
                   <br />
-                  "message": "当前处于宵禁状态"
+                  <span className='pl-4'>"message": "当前处于宵禁状态",</span>
+                  <br />
+                  <span className='pl-4'>"type": "permission_error",</span>
+                  <br />
+                  <span className='pl-4'>"param": "",</span>
+                  <br />
+                  <span className='pl-4'>"code": "system_curfew"</span>
+                  <br />
+                  {'}'}
                 </div>
                 <span>{'}'}</span>
               </div>
