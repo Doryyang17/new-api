@@ -67,6 +67,7 @@ export function useUpdateOption() {
           )
         ) {
           queryClient.invalidateQueries({ queryKey: ['rankings'] })
+          queryClient.invalidateQueries({ queryKey: ['daily-usage-status'] })
         }
 
         toast.success(i18next.t('Setting updated successfully'))

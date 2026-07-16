@@ -16,6 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { DailyUsageStatus } from '@/features/system-settings/maintenance/daily-usage-types'
+
+export type { DailyUsageStatus } from '@/features/system-settings/maintenance/daily-usage-types'
+
 // ----------------------------------------------------------------------------
 // Rankings types
 // ----------------------------------------------------------------------------
@@ -121,24 +125,6 @@ export type VendorShareSeries = {
   /** Vendors that appear in the series, sorted by aggregate tokens desc. */
   vendors: Array<{ name: string; total: number; share: number }>
   buckets: number
-}
-
-export type DailyUsageStatus = {
-  enabled: boolean
-  limit_tokens: number
-  used_tokens: number
-  remaining_tokens: number
-  exceeded: boolean
-  message: string
-  code: string
-  timezone: string
-  day_start: number
-  day_end: number
-  refreshed_at: number
-  next_refresh_at: number
-  refresh_interval_seconds: number
-  retry_after_seconds: number
-  evaluation_error?: string
 }
 
 export type RankingsSnapshot = {

@@ -66,6 +66,7 @@ const (
 	ErrorCodeAccessDenied              ErrorCode = "access_denied"
 	ErrorCodeSystemCurfew              ErrorCode = "system_curfew"
 	ErrorCodeSystemDailyUsageExceeded  ErrorCode = "system_daily_usage_exceeded"
+	ErrorCodeModelDailyUsageExceeded   ErrorCode = "model_daily_usage_exceeded"
 	ErrorCodeRequestProbeRateLimited   ErrorCode = "request_probe_rate_limited"
 	ErrorCodeRequestConcurrencyLimited ErrorCode = "request_concurrency_limited"
 

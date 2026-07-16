@@ -88,7 +88,7 @@ const CurfewHome = () => (
           <section className='space-y-6 text-center lg:text-left'>
             <div className='inline-flex items-center gap-2 rounded-full border border-semi-color-border bg-white/80 px-4 py-2 text-sm font-medium text-semi-color-primary shadow-sm backdrop-blur dark:bg-white/10'>
               <IconAlertTriangle />
-              系统可用时间
+              系统暂不可用
             </div>
             <div className='space-y-4'>
               <h1 className='text-4xl md:text-5xl lg:text-6xl font-bold leading-tight text-semi-color-text-0'>

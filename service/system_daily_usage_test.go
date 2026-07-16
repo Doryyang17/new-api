@@ -14,71 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildSystemDailyUsageStatus(t *testing.T) {
-	now := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
-	settings := system_setting.DailyUsageLimitSettings{
-		Enabled:     true,
-		LimitTokens: 1000,
-		Timezone:    "UTC",
-		Message:     system_setting.DefaultDailyUsageLimitMsg,
-	}
-	signature := dailyUsageSettingsSignature(settings)
-
-	t.Run("below limit", func(t *testing.T) {
-		status := buildSystemDailyUsageStatus(now, settings, signature, func(dayStart int64, timezone string, refreshedAt int64) (int64, error) {
-			require.Equal(t, time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC).Unix(), dayStart)
-			require.Equal(t, "UTC", timezone)
-			require.Equal(t, now.Unix(), refreshedAt)
-			return 900, nil
-		})
-
-		assert.True(t, status.Enabled)
-		assert.False(t, status.ShouldBlock())
-		assert.Equal(t, int64(900), status.UsedTokens)
-		assert.Equal(t, int64(100), status.RemainingTokens)
-		assert.Empty(t, status.EvaluationError)
-	})
-
-	t.Run("reached limit", func(t *testing.T) {
-		status := buildSystemDailyUsageStatus(now, settings, signature, func(int64, string, int64) (int64, error) {
-			return 1000, nil
-		})
-
-		assert.True(t, status.ShouldBlock())
-		assert.Equal(t, int64(1000), status.UsedTokens)
-		assert.Equal(t, int64(0), status.RemainingTokens)
-		assert.Positive(t, status.RetryAfterSeconds)
-	})
-
-	t.Run("snapshot refresh failure fails closed when enabled", func(t *testing.T) {
-		status := buildSystemDailyUsageStatus(now, settings, signature, func(int64, string, int64) (int64, error) {
-			return 0, errors.New("query failed")
-		})
-
-		assert.True(t, status.ShouldBlock())
-		assert.Equal(t, "query failed", status.EvaluationError)
-	})
-}
-
-func TestBuildSystemDailyUsageStatusDisabledDoesNotBlockOnCounterReadFailure(t *testing.T) {
-	now := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
-	settings := system_setting.DailyUsageLimitSettings{
-		Enabled:     false,
-		LimitTokens: 0,
-		Timezone:    "UTC",
-		Message:     system_setting.DefaultDailyUsageLimitMsg,
-	}
-	status := buildSystemDailyUsageStatus(now, settings, dailyUsageSettingsSignature(settings), func(int64, string, int64) (int64, error) {
-		return 0, errors.New("query failed")
-	})
-
-	assert.False(t, status.ShouldBlock())
-	assert.Equal(t, "query failed", status.EvaluationError)
-}
-
-func TestBuildSystemDailyUsageStatusRequiresConsumeLogsWhenEnabled(t *testing.T) {
+func TestBuildSystemDailyUsageStatusEnforcesGlobalAndModelLayers(t *testing.T) {
 	originalLogConsumeEnabled := common.LogConsumeEnabled
-	common.LogConsumeEnabled = false
+	common.LogConsumeEnabled = true
 	t.Cleanup(func() {
 		common.LogConsumeEnabled = originalLogConsumeEnabled
 	})
@@ -88,13 +26,105 @@ func TestBuildSystemDailyUsageStatusRequiresConsumeLogsWhenEnabled(t *testing.T)
 		LimitTokens: 1000,
 		Timezone:    "UTC",
 		Message:     system_setting.DefaultDailyUsageLimitMsg,
+		ModelLimits: []system_setting.DailyUsageModelLimit{{ModelName: "GLM-5.2", MaxUsage: 200, Enabled: true}},
 	}
+	signature := dailyUsageSettingsSignature(settings)
 
-	status := buildSystemDailyUsageStatus(now, settings, dailyUsageSettingsSignature(settings), func(int64, string, int64) (int64, error) {
-		return 900, nil
+	t.Run("model limit blocks only matching model", func(t *testing.T) {
+		status := buildSystemDailyUsageStatus(now, settings, signature, func(dayStart int64, timezone string, refreshedAt int64, models []string) (model.SystemDailyUsageSnapshot, error) {
+			require.Equal(t, time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC).Unix(), dayStart)
+			require.Equal(t, "UTC", timezone)
+			require.Equal(t, now.Unix(), refreshedAt)
+			require.Equal(t, []string{"GLM-5.2"}, models)
+			return model.SystemDailyUsageSnapshot{
+				UsedTokens:      500,
+				ModelUsedTokens: map[string]int64{"GLM-5.2": 200},
+			}, nil
+		})
+
+		assert.False(t, status.ShouldBlock())
+		modelLimit, blocked := status.ShouldBlockModel("GLM-5.2")
+		assert.True(t, blocked)
+		assert.Equal(t, int64(200), modelLimit.CurrentUsage)
+		_, blocked = status.ShouldBlockModel("GLM-5.1")
+		assert.False(t, blocked)
+		_, blocked = status.ShouldBlockModel("GPT-5")
+		assert.False(t, blocked)
 	})
 
-	assert.True(t, status.ShouldBlock())
+	t.Run("global limit blocks all models", func(t *testing.T) {
+		status := buildSystemDailyUsageStatus(now, settings, signature, func(int64, string, int64, []string) (model.SystemDailyUsageSnapshot, error) {
+			return model.SystemDailyUsageSnapshot{
+				UsedTokens:      1000,
+				ModelUsedTokens: map[string]int64{"GLM-5.2": 100},
+			}, nil
+		})
+
+		assert.True(t, status.ShouldBlock())
+		assert.Equal(t, int64(0), status.RemainingTokens)
+	})
+
+	t.Run("snapshot refresh failure fails closed", func(t *testing.T) {
+		status := buildSystemDailyUsageStatus(now, settings, signature, func(int64, string, int64, []string) (model.SystemDailyUsageSnapshot, error) {
+			return model.SystemDailyUsageSnapshot{}, errors.New("query failed")
+		})
+
+		assert.True(t, status.ShouldBlock())
+		assert.Equal(t, "query failed", status.EvaluationError)
+	})
+}
+
+func TestBuildSystemDailyUsageStatusModelQueryFailureDoesNotBlockGlobalOrOtherModels(t *testing.T) {
+	originalLogConsumeEnabled := common.LogConsumeEnabled
+	common.LogConsumeEnabled = true
+	t.Cleanup(func() {
+		common.LogConsumeEnabled = originalLogConsumeEnabled
+	})
+	now := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
+	settings := system_setting.DailyUsageLimitSettings{
+		Enabled:     true,
+		LimitTokens: 1000,
+		Timezone:    "UTC",
+		Message:     system_setting.DefaultDailyUsageLimitMsg,
+		ModelLimits: []system_setting.DailyUsageModelLimit{{ModelName: "GLM-5.2", MaxUsage: 200, Enabled: true}},
+	}
+	status := buildSystemDailyUsageStatus(now, settings, dailyUsageSettingsSignature(settings), func(int64, string, int64, []string) (model.SystemDailyUsageSnapshot, error) {
+		return model.SystemDailyUsageSnapshot{
+			UsedTokens:           100,
+			ModelUsedTokens:      map[string]int64{},
+			ModelEvaluationError: "model query failed",
+		}, nil
+	})
+
+	assert.False(t, status.ShouldBlock())
+	assert.Equal(t, int64(100), status.UsedTokens)
+	assert.Empty(t, status.EvaluationError)
+	_, blocked := status.ShouldBlockModel("GLM-5.2")
+	assert.True(t, blocked)
+	_, blocked = status.ShouldBlockModel("GLM-5.1")
+	assert.False(t, blocked)
+}
+
+func TestBuildSystemDailyUsageStatusRequiresConsumeLogsForModelLimits(t *testing.T) {
+	originalLogConsumeEnabled := common.LogConsumeEnabled
+	common.LogConsumeEnabled = false
+	t.Cleanup(func() {
+		common.LogConsumeEnabled = originalLogConsumeEnabled
+	})
+	settings := system_setting.DailyUsageLimitSettings{
+		Enabled:     false,
+		LimitTokens: 1000,
+		Timezone:    "UTC",
+		Message:     system_setting.DefaultDailyUsageLimitMsg,
+		ModelLimits: []system_setting.DailyUsageModelLimit{{ModelName: "GLM-5.2", MaxUsage: 200, Enabled: true}},
+	}
+	status := buildSystemDailyUsageStatus(time.Now(), settings, dailyUsageSettingsSignature(settings), func(int64, string, int64, []string) (model.SystemDailyUsageSnapshot, error) {
+		return model.SystemDailyUsageSnapshot{}, nil
+	})
+
+	assert.False(t, status.ShouldBlock())
+	_, blocked := status.ShouldBlockModel("GLM-5.2")
+	assert.True(t, blocked)
 	assert.Equal(t, system_setting.DailyUsageRequiresLogsMsg, status.EvaluationError)
 }
 
@@ -105,6 +135,7 @@ func TestGetSystemDailyUsageStatusRefreshesExpiredSnapshotFromLogs(t *testing.T)
 	require.NoError(t, model.DB.Create(&model.Log{
 		CreatedAt:        dayStart + 60,
 		Type:             model.LogTypeConsume,
+		ModelName:        "GLM-5.2",
 		PromptTokens:     120,
 		CompletionTokens: 30,
 	}).Error)
@@ -121,11 +152,11 @@ func TestGetSystemDailyUsageStatusRefreshesExpiredSnapshotFromLogs(t *testing.T)
 		"daily_usage_setting.limit_tokens": "1000",
 		"daily_usage_setting.timezone":     "UTC",
 		"daily_usage_setting.message":      system_setting.DefaultDailyUsageLimitMsg,
+		"daily_usage_setting.model_limits": `[{"model_name":"GLM-5.2","model_max_usage":200,"enabled":true}]`,
 	}))
 
 	settings := system_setting.GetDailyUsageLimitSettings()
 	staleStatus := baseSystemDailyUsageStatus(now.Add(-10*time.Minute), settings, dailyUsageSettingsSignature(settings))
-	staleStatus.UsedTokens = 0
 	staleStatus.NextRefreshAt = now.Add(-5 * time.Minute).Unix()
 
 	systemDailyUsageMu.Lock()
@@ -145,6 +176,8 @@ func TestGetSystemDailyUsageStatusRefreshesExpiredSnapshotFromLogs(t *testing.T)
 
 	status := GetSystemDailyUsageStatus()
 	assert.Equal(t, int64(150), status.UsedTokens)
-	assert.False(t, status.ShouldBlock())
+	modelLimit, blocked := status.ShouldBlockModel("GLM-5.2")
+	assert.False(t, blocked)
+	assert.Equal(t, int64(150), modelLimit.CurrentUsage)
 	assert.Greater(t, status.NextRefreshAt, now.Unix())
 }

@@ -58,6 +58,7 @@ func TestVideoContentProxyUsesDailyUsageLimitBeforeAuth(t *testing.T) {
 		"daily_usage_setting.limit_tokens": "1",
 		"daily_usage_setting.timezone":     "UTC",
 		"daily_usage_setting.message":      message,
+		"daily_usage_setting.model_limits": "[]",
 	}))
 
 	engine := gin.New()

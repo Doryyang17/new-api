@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { CheckCircle2, Gauge, Loader2, TriangleAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 import { formatTokens } from '../lib/format'
@@ -136,20 +137,49 @@ function DailyUsageStrip(props: DailyUsageStripProps) {
     status.enabled && status.limit_tokens > 0
       ? Math.min(100, (status.used_tokens / status.limit_tokens) * 100)
       : 0
+  const enabledModelLimits = (status.model_limits ?? []).filter(
+    (limit) => limit.enabled
+  )
+  const hasEnabledModelLimits = enabledModelLimits.length > 0
+  const hasExceededModelLimit = enabledModelLimits.some(
+    (limit) => limit.exceeded
+  )
+  const hasEnabledLimit = status.enabled || hasEnabledModelLimits
+  const hasExceededLimit = status.exceeded || hasExceededModelLimit
+
   let badgeLabel = t('Limit off')
   if (status.exceeded) {
     badgeLabel = t('Limit reached')
+  } else if (hasExceededModelLimit) {
+    badgeLabel = '模型已限制'
   } else if (status.enabled) {
     badgeLabel = t('Limit enabled')
+  } else if (hasEnabledModelLimits) {
+    badgeLabel = '模型限制已启用'
   }
 
   let badgeClassName = 'border-border bg-muted/50 text-muted-foreground'
-  if (status.exceeded) {
+  if (hasExceededLimit) {
     badgeClassName = 'border-destructive/40 bg-destructive/10 text-destructive'
-  } else if (status.enabled) {
+  } else if (hasEnabledLimit) {
     badgeClassName = 'border-primary/30 bg-primary/10 text-primary'
   }
-  const Icon = status.exceeded ? TriangleAlert : CheckCircle2
+  const Icon = hasExceededLimit ? TriangleAlert : CheckCircle2
+
+  let statusDescription = t(
+    'Tracking refreshes every 5 minutes. No daily cap is enforced until the switch is enabled.'
+  )
+  if (status.enabled && hasEnabledModelLimits) {
+    statusDescription =
+      '全站限制与模型独立限制均已启用；全站超限会停止所有模型，模型超限只影响对应模型。'
+  } else if (status.enabled) {
+    statusDescription = t(
+      'Updated every 5 minutes. Requests are blocked before channel dispatch when the limit is reached.'
+    )
+  } else if (hasEnabledModelLimits) {
+    statusDescription =
+      '当前仅启用模型独立限制；达到额度时只拒绝对应模型，其他模型继续可用。'
+  }
 
   return (
     <div
@@ -162,9 +192,7 @@ function DailyUsageStrip(props: DailyUsageStripProps) {
             <span className='bg-muted text-muted-foreground inline-flex size-8 items-center justify-center rounded-md'>
               <Gauge className='size-4' />
             </span>
-            <h2 className='text-sm font-semibold'>
-              {t("Today's system usage")}
-            </h2>
+            <h2 className='text-sm font-semibold'>今日全站使用量</h2>
             <span
               className={cn(
                 'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium',
@@ -176,13 +204,7 @@ function DailyUsageStrip(props: DailyUsageStripProps) {
             </span>
           </div>
           <p className='text-muted-foreground max-w-3xl text-xs leading-5'>
-            {status.enabled
-              ? t(
-                  'Updated every 5 minutes. Requests are blocked before channel dispatch when the limit is reached.'
-                )
-              : t(
-                  'Tracking refreshes every 5 minutes. No daily cap is enforced until the switch is enabled.'
-                )}
+            {statusDescription}
           </p>
         </div>
 
@@ -220,6 +242,44 @@ function DailyUsageStrip(props: DailyUsageStripProps) {
               )}
               style={{ width: `${progress}%` }}
             />
+          </div>
+        </div>
+      ) : null}
+
+      {enabledModelLimits.length > 0 ? (
+        <div className='border-border/60 mt-4 border-t pt-4'>
+          <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+            <h3 className='text-xs font-semibold'>模型独立限制</h3>
+            <span className='text-muted-foreground text-xs'>
+              仅影响对应模型
+            </span>
+          </div>
+          <div className='grid gap-2 md:grid-cols-2 xl:grid-cols-3'>
+            {enabledModelLimits.map((limit) => (
+              <div
+                key={limit.model_name}
+                className='border-border/60 flex min-w-0 items-center justify-between gap-3 rounded-md border px-3 py-2'
+              >
+                <div className='min-w-0'>
+                  <div className='truncate text-xs font-medium'>
+                    {limit.model_name}
+                  </div>
+                  <div className='text-muted-foreground mt-0.5 text-xs'>
+                    {formatTokens(limit.model_current_usage)} /{' '}
+                    {formatTokens(limit.model_max_usage)} tokens
+                  </div>
+                </div>
+                <Badge
+                  variant={limit.exceeded ? 'destructive' : 'outline'}
+                  className={cn(
+                    !limit.exceeded &&
+                      'border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+                  )}
+                >
+                  {limit.exceeded ? '已限制' : '正常'}
+                </Badge>
+              </div>
+            ))}
           </div>
         </div>
       ) : null}

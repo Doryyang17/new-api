@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
+import type { DailyUsageStatus } from './maintenance/daily-usage-types'
 import type {
   ConfirmPaymentComplianceResponse,
   CreateRegistrationCodesResponse,
@@ -44,6 +45,15 @@ import type {
 
 export async function getSystemOptions() {
   const res = await api.get<SystemOptionsResponse>('/api/option/')
+  return res.data
+}
+
+export async function getDailyUsageStatus(): Promise<{
+  success: boolean
+  message?: string
+  data: DailyUsageStatus
+}> {
+  const res = await api.get('/api/option/daily-usage-status')
   return res.data
 }
 

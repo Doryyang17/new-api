@@ -29,7 +29,7 @@ export function CurfewHome() {
         <section className='space-y-7'>
           <div className='border-primary/20 bg-background/80 text-primary inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium shadow-sm backdrop-blur'>
             <Moon className='size-4' aria-hidden='true' />
-            系统可用时间
+            系统暂不可用
           </div>
 
           <div className='space-y-5'>

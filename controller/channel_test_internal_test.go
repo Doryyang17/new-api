@@ -135,6 +135,7 @@ func TestChannelTestDailyUsageLimitReturnsRetrySafeError(t *testing.T) {
 		"daily_usage_setting.limit_tokens": "1",
 		"daily_usage_setting.timezone":     "UTC",
 		"daily_usage_setting.message":      "daily limit exceeded",
+		"daily_usage_setting.model_limits": "[]",
 	}))
 	require.NoError(t, model.LOG_DB.Create(&model.Log{
 		CreatedAt:        time.Now().Unix(),

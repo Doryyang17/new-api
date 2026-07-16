@@ -481,9 +481,13 @@ func RelayTask(c *gin.Context) {
 		})
 		return
 	}
+	relayInfo.InitChannelMeta(c)
 
 	if taskErr := relay.ResolveOriginTask(c, relayInfo); taskErr != nil {
 		respondTaskError(c, taskErr)
+		return
+	}
+	if middleware.CheckSystemModelDailyUsageLimit(c, relayInfo.OriginModelName) {
 		return
 	}
 

@@ -17,14 +17,23 @@ func TestRefreshSystemDailyUsageSnapshotFromLogs(t *testing.T) {
 	require.NoError(t, LOG_DB.Create(&Log{
 		CreatedAt:        dayStart + 60,
 		Type:             LogTypeConsume,
+		ModelName:        "gpt-4",
 		PromptTokens:     100,
 		CompletionTokens: 40,
 	}).Error)
 	require.NoError(t, LOG_DB.Create(&Log{
 		CreatedAt:        dayStart + 120,
 		Type:             LogTypeConsume,
+		ModelName:        "claude-3",
 		PromptTokens:     25,
 		CompletionTokens: 35,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt:        dayStart + 150,
+		Type:             LogTypeConsume,
+		ModelName:        "gpt-4-gizmo-*",
+		PromptTokens:     30,
+		CompletionTokens: 20,
 	}).Error)
 	require.NoError(t, LOG_DB.Create(&Log{
 		CreatedAt:        dayStart + 180,
@@ -33,13 +42,51 @@ func TestRefreshSystemDailyUsageSnapshotFromLogs(t *testing.T) {
 		CompletionTokens: 999,
 	}).Error)
 
-	usedTokens, err := RefreshSystemDailyUsageSnapshot(dayStart, "UTC", dayStart+300)
+	allTokens, err := GetSystemDailyUsageLogTokens(dayStart, "UTC", nil)
 	require.NoError(t, err)
-	assert.Equal(t, int64(200), usedTokens)
+	assert.Equal(t, int64(250), allTokens)
+
+	gptTokens, err := GetSystemDailyUsageLogTokens(dayStart, "UTC", []string{"gpt-4"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(140), gptTokens)
+
+	selectedTokens, err := GetSystemDailyUsageLogTokens(dayStart, "UTC", []string{"gpt-4", "claude-3"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(200), selectedTokens)
+
+	gizmoTokens, err := GetSystemDailyUsageLogTokens(dayStart, "UTC", []string{"gpt-4-gizmo-abc123"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(50), gizmoTokens)
+
+	emptyScopeTokens, err := GetSystemDailyUsageLogTokens(dayStart, "UTC", []string{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), emptyScopeTokens)
+
+	modelTotals, err := GetSystemDailyUsageLogTokensByModel(dayStart, "UTC", []string{"gpt-4", "claude-3", "gpt-4-gizmo-abc123"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int64{
+		"gpt-4":              140,
+		"claude-3":           60,
+		"gpt-4-gizmo-abc123": 50,
+	}, modelTotals)
+
+	snapshot, err := RefreshSystemDailyUsageSnapshot(dayStart, "UTC", dayStart+300, []string{"gpt-4"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(250), snapshot.UsedTokens)
+	assert.Equal(t, map[string]int64{"gpt-4": 140}, snapshot.ModelUsedTokens)
 
 	snapshotTokens, err := GetSystemDailyUsageSnapshotTokens(dayStart, "UTC")
 	require.NoError(t, err)
-	assert.Equal(t, int64(200), snapshotTokens)
+	assert.Equal(t, int64(250), snapshotTokens)
+}
+
+func TestNormalizeUsageModelName(t *testing.T) {
+	assert.Equal(t, "gpt-4-gizmo-*", NormalizeUsageModelName("gpt-4-gizmo-abc123"))
+	assert.Equal(t, "gpt-4o-gizmo-*", NormalizeUsageModelName("gpt-4o-gizmo-abc123"))
+	assert.Equal(t, "gpt-4", NormalizeUsageModelName("gpt-4"))
+	assert.True(t, UsageModelMatches("gpt-4-gizmo-abc123", "gpt-4-gizmo-*"))
+	assert.True(t, UsageModelMatches("gemini-2.5-flash-thinking-*", "gemini-2.5-flash-thinking-1024"))
+	assert.False(t, UsageModelMatches("GLM-5.2", "GLM-5.1"))
 }
 
 func TestRefreshSystemDailyUsageSnapshotOverwritesOldValue(t *testing.T) {
@@ -54,9 +101,9 @@ func TestRefreshSystemDailyUsageSnapshotOverwritesOldValue(t *testing.T) {
 		CompletionTokens: 20,
 	}).Error)
 
-	usedTokens, err := RefreshSystemDailyUsageSnapshot(dayStart, "UTC", dayStart+180)
+	snapshot, err := RefreshSystemDailyUsageSnapshot(dayStart, "UTC", dayStart+180, nil)
 	require.NoError(t, err)
-	assert.Equal(t, int64(100), usedTokens)
+	assert.Equal(t, int64(100), snapshot.UsedTokens)
 
 	snapshotTokens, err := GetSystemDailyUsageSnapshotTokens(dayStart, "UTC")
 	require.NoError(t, err)

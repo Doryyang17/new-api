@@ -36,6 +36,7 @@ const defaultCustomSettings: CustomSettings = {
   'daily_usage_setting.limit_tokens': 0,
   'daily_usage_setting.timezone': 'Asia/Shanghai',
   'daily_usage_setting.message': '当日系统使用量已超上限，请每天再来。',
+  'daily_usage_setting.model_limits': [],
 }
 
 export function CustomSettings() {

@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { DailyUsageModelLimitConfig } from './maintenance/daily-usage-types'
+
 export type SystemOption = {
   key: string
   value: string
@@ -530,6 +532,7 @@ export type CustomSettings = {
   'daily_usage_setting.limit_tokens': number
   'daily_usage_setting.timezone': string
   'daily_usage_setting.message': string
+  'daily_usage_setting.model_limits': DailyUsageModelLimitConfig[]
 }
 
 export type RegistrationCode = {

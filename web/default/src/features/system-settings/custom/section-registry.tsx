@@ -51,6 +51,8 @@ const CUSTOM_SECTIONS = [
           'daily_usage_setting.message':
             settings['daily_usage_setting.message'] ??
             '当日系统使用量已超上限，请每天再来。',
+          'daily_usage_setting.model_limits':
+            settings['daily_usage_setting.model_limits'] ?? [],
         }}
       />
     ),

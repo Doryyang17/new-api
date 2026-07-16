@@ -77,8 +77,9 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if status := service.GetSystemDailyUsageStatus(); status.ShouldBlock() {
-		err := errors.New(status.Message)
+	usageStatus := service.GetSystemDailyUsageStatus()
+	if usageStatus.ShouldBlock() {
+		err := errors.New(usageStatus.Message)
 		return testResult{
 			localErr:    err,
 			newAPIError: types.NewErrorWithStatusCode(err, types.ErrorCodeSystemDailyUsageExceeded, http.StatusTooManyRequests, types.ErrOptionWithSkipRetry()),
@@ -160,6 +161,13 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 	if strings.HasPrefix(requestPath, "/v1/responses/compact") {
 		testModel = ratio_setting.WithCompactModelSuffix(testModel)
+	}
+	if modelLimit, shouldBlock := usageStatus.ShouldBlockModel(testModel); shouldBlock {
+		err := errors.New(modelLimit.Message)
+		return testResult{
+			localErr:    err,
+			newAPIError: types.NewErrorWithStatusCode(err, types.ErrorCodeModelDailyUsageExceeded, http.StatusTooManyRequests, types.ErrOptionWithSkipRetry()),
+		}
 	}
 
 	c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, requestPath, nil)

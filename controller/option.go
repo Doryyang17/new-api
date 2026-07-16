@@ -433,36 +433,38 @@ func UpdateOption(c *gin.Context) {
 		})
 		return
 	}
-	if option.Key == "daily_usage_setting.enabled" {
-		enabled, _ := strconv.ParseBool(strings.TrimSpace(option.Value.(string)))
-		if enabled && !common.LogConsumeEnabled {
+	if strings.HasPrefix(option.Key, "daily_usage_setting.") {
+		prospective := system_setting.GetDailyUsageLimitSettings()
+		switch option.Key {
+		case "daily_usage_setting.enabled":
+			prospective.Enabled, _ = strconv.ParseBool(strings.TrimSpace(option.Value.(string)))
+		case "daily_usage_setting.limit_tokens":
+			prospective.LimitTokens, _ = strconv.ParseInt(option.Value.(string), 10, 64)
+		case "daily_usage_setting.timezone":
+			prospective.Timezone = strings.TrimSpace(option.Value.(string))
+		case "daily_usage_setting.message":
+			prospective.Message = strings.TrimSpace(option.Value.(string))
+		case "daily_usage_setting.model_limits":
+			prospective.ModelLimits, _ = system_setting.ParseDailyUsageModelLimits(option.Value.(string))
+		}
+		if prospective.AnyLimitEnabled() && !common.LogConsumeEnabled {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": system_setting.DailyUsageRequiresLogsMsg,
 			})
 			return
 		}
-		if enabled && system_setting.GetDailyUsageLimitSettings().LimitTokens <= 0 {
+		if err := system_setting.ValidateDailyUsageLimitSettings(prospective); err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
-				"message": "daily usage token limit must be greater than 0 when enabled",
-			})
-			return
-		}
-	}
-	if option.Key == "daily_usage_setting.limit_tokens" && system_setting.GetDailyUsageLimitSettings().Enabled {
-		limit, _ := strconv.ParseInt(option.Value.(string), 10, 64)
-		if limit <= 0 {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "daily usage token limit must be greater than 0 when enabled",
+				"message": err.Error(),
 			})
 			return
 		}
 	}
 	if option.Key == "LogConsumeEnabled" {
 		logConsumeEnabled, _ := strconv.ParseBool(strings.TrimSpace(option.Value.(string)))
-		if !logConsumeEnabled && system_setting.GetDailyUsageLimitSettings().Enabled {
+		if !logConsumeEnabled && system_setting.GetDailyUsageLimitSettings().AnyLimitEnabled() {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": system_setting.DailyUsageRequiresLogsMsg,
@@ -485,5 +487,12 @@ func UpdateOption(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
+	})
+}
+
+func GetDailyUsageStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    service.GetSystemDailyUsageStatus(),
 	})
 }
