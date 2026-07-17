@@ -99,6 +99,29 @@ function splitQuotaDisplay(value: string): { prefix: string; amount: string } {
   return { prefix: match[1], amount: match[2] }
 }
 
+function renderQuotaDeductionAmount(quota: number, bonus = false) {
+  const quotaDisplay = splitQuotaDisplay(formatLogQuota(quota))
+
+  return (
+    <span className='inline-flex items-center gap-1.5'>
+      <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 [font-family:var(--font-body)] text-sm leading-none font-semibold tabular-nums'>
+        {quotaDisplay.prefix && (
+          <span className='mr-1'>{quotaDisplay.prefix}</span>
+        )}
+        <span>{quotaDisplay.amount}</span>
+      </span>
+      {bonus && (
+        <img
+          src='/checkin-bonus-icon.svg'
+          alt='签到赠金抵扣'
+          title='签到赠金抵扣'
+          className='size-5 shrink-0'
+        />
+      )}
+    </span>
+  )
+}
+
 function buildDetailSegments(
   log: UsageLog,
   other: LogOtherData | null,
@@ -704,6 +727,11 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const quota = row.getValue('quota') as number
         const other = parseLogOther(log.other)
         const isSubscription = other?.billing_source === 'subscription'
+        const bonusDeducted = other?.checkin_bonus_deducted ?? 0
+
+        if (bonusDeducted > 0) {
+          return renderQuotaDeductionAmount(other?.consume_total ?? quota, true)
+        }
 
         if (isSubscription) {
           return (
@@ -730,19 +758,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           )
         }
 
-        const quotaStr = formatLogQuota(quota)
-        const quotaDisplay = splitQuotaDisplay(quotaStr)
-
-        return (
-          <div className='flex flex-col gap-0.5'>
-            <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 [font-family:var(--font-body)] text-sm leading-none font-semibold tabular-nums'>
-              {quotaDisplay.prefix && (
-                <span className='mr-1'>{quotaDisplay.prefix}</span>
-              )}
-              <span>{quotaDisplay.amount}</span>
-            </span>
-          </div>
-        )
+        return renderQuotaDeductionAmount(quota)
       },
     },
 

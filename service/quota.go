@@ -139,15 +139,25 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	quota, clamp := calculateAudioQuota(quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
 
-	if userQuota < quota {
-		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(quota))
+	if relayInfo.BillingSource != BillingSourceSubscription {
+		bonusAmount, bonusErr := model.GetActiveCheckinBonusAmount(relayInfo.UserId, time.Now())
+		if bonusErr != nil {
+			return bonusErr
+		}
+		if userQuota+bonusAmount < quota {
+			return fmt.Errorf("user quota is not enough, user quota: %s, check-in bonus: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(bonusAmount), logger.FormatQuota(quota))
+		}
 	}
 
 	if !token.UnlimitedQuota && token.RemainQuota < quota {
 		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
 	}
 
-	err = PostConsumeQuota(relayInfo, quota, 0, false)
+	if relayInfo.Billing != nil {
+		err = relayInfo.Billing.Reserve(relayInfo.Billing.GetPreConsumedQuota() + quota)
+	} else {
+		err = PostConsumeQuota(relayInfo, quota, 0, false)
+	}
 	if err != nil {
 		return err
 	}
@@ -408,46 +418,99 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 	return nil
 }
 
-func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (err error) {
+func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) error {
+	return postConsumeQuota(relayInfo, quota, preConsumedQuota, sendEmail, 0)
+}
 
-	// 1) Consume from wallet quota OR subscription item
-	if relayInfo != nil && relayInfo.BillingSource == BillingSourceSubscription {
-		if relayInfo.SubscriptionId == 0 {
-			return errors.New("subscription id is missing")
-		}
-		delta := int64(quota)
-		if delta != 0 {
-			if err := model.PostConsumeUserSubscriptionDelta(relayInfo.SubscriptionId, delta); err != nil {
-				return err
-			}
-			relayInfo.SubscriptionPostDelta += delta
-		}
-	} else {
-		// Wallet
-		if quota > 0 {
-			err = model.DecreaseUserQuota(relayInfo.UserId, quota, false)
-		} else {
-			err = model.IncreaseUserQuota(relayInfo.UserId, -quota, false)
-		}
-		if err != nil {
-			return err
-		}
+func PostConsumeMidjourneyQuota(relayInfo *relaycommon.RelayInfo, quota int, sendEmail bool, taskId int) error {
+	if taskId <= 0 {
+		return errors.New("midjourney task id is missing")
+	}
+	return postConsumeQuota(relayInfo, quota, 0, sendEmail, taskId)
+}
+
+func postConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool, midjourneyTaskId int) (err error) {
+	if relayInfo == nil {
+		return errors.New("relay info is nil")
 	}
 
-	if !relayInfo.IsPlayground {
-		if quota > 0 {
-			err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
-		} else {
-			err = model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, -quota)
+	adjustOriginalFunding := func(delta int) error {
+		if delta == 0 {
+			return nil
 		}
+		if relayInfo.BillingSource == BillingSourceSubscription {
+			if relayInfo.SubscriptionId == 0 {
+				return errors.New("subscription id is missing")
+			}
+			if err := model.PostConsumeUserSubscriptionDelta(relayInfo.SubscriptionId, int64(delta)); err != nil {
+				return err
+			}
+			relayInfo.SubscriptionPostDelta += int64(delta)
+			return nil
+		}
+		if delta > 0 {
+			return model.DecreaseUserQuota(relayInfo.UserId, delta, false)
+		}
+		return model.IncreaseUserQuota(relayInfo.UserId, -delta, false)
+	}
+
+	if quota > 0 {
+		fundingSource := BillingSourceWallet
+		if relayInfo.BillingSource == BillingSourceSubscription {
+			fundingSource = BillingSourceSubscription
+		}
+		bonusRequestId := common.NewRequestId()
+		result, chargeErr := model.ConsumeCheckinBonusFunding(model.CheckinBonusImmediateChargeParams{
+			UserId:                relayInfo.UserId,
+			RequestId:             bonusRequestId,
+			Amount:                quota,
+			OriginalFundingSource: fundingSource,
+			SubscriptionId:        relayInfo.SubscriptionId,
+			OwnerNode:             common.NodeName,
+			OwnerStartedAt:        common.StartTime,
+			OwnerInstanceId:       checkinBonusProcessId,
+			TokenId:               relayInfo.TokenId,
+			TokenKey:              relayInfo.TokenKey,
+			DeductToken:           !relayInfo.IsPlayground,
+			MidjourneyTaskId:      midjourneyTaskId,
+			Now:                   time.Now(),
+		})
+		if chargeErr != nil {
+			return chargeErr
+		}
+		relayInfo.BillingSource = fundingSource
+		relayInfo.CheckinBonusRequestId = bonusRequestId
+		relayInfo.CheckinBonusConsumed += result.BonusConsumed
+		relayInfo.OriginalFundingConsumed += result.OriginalConsumed
+		if fundingSource == BillingSourceSubscription {
+			relayInfo.SubscriptionAmountTotal = result.SubscriptionAmountTotal
+			relayInfo.SubscriptionAmountUsedAfterPreConsume = result.SubscriptionAmountUsedAfter
+			if planInfo, planErr := model.GetSubscriptionPlanInfoByUserSubscriptionId(relayInfo.SubscriptionId); planErr == nil && planInfo != nil {
+				relayInfo.SubscriptionPlanId = planInfo.PlanId
+				relayInfo.SubscriptionPlanTitle = planInfo.PlanTitle
+			}
+		}
+		if sendEmail && result.OriginalConsumed+preConsumedQuota != 0 {
+			checkAndSendQuotaNotify(relayInfo, result.OriginalConsumed, preConsumedQuota)
+		}
+		return nil
+	}
+
+	originalQuota := quota
+	if err = adjustOriginalFunding(originalQuota); err != nil {
+		return err
+	}
+	if !relayInfo.IsPlayground && quota < 0 {
+		err = model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, -quota)
 		if err != nil {
+			_ = adjustOriginalFunding(-originalQuota)
 			return err
 		}
 	}
 
 	if sendEmail {
-		if (quota + preConsumedQuota) != 0 {
-			checkAndSendQuotaNotify(relayInfo, quota, preConsumedQuota)
+		if (originalQuota + preConsumedQuota) != 0 {
+			checkAndSendQuotaNotify(relayInfo, originalQuota, preConsumedQuota)
 		}
 	}
 

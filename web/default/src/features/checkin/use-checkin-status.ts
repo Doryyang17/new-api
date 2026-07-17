@@ -16,25 +16,26 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AccountBalanceSummary } from '@/features/checkin'
+import { useQuery } from '@tanstack/react-query'
+import i18next from 'i18next'
 
-import type { UserWalletData } from '../types'
+import { getCheckinStatus } from './api'
 
-interface WalletStatsCardProps {
-  user: UserWalletData | null
-  loading?: boolean
-  checkinEnabled: boolean
-}
+export const CHECKIN_STATUS_QUERY_KEY = ['checkin-status'] as const
 
-export function WalletStatsCard(props: WalletStatsCardProps) {
-  return (
-    <AccountBalanceSummary
-      balance={props.user?.quota ?? 0}
-      usedQuota={props.user?.used_quota ?? 0}
-      requestCount={props.user?.request_count ?? 0}
-      loading={props.loading === true}
-      checkinEnabled={props.checkinEnabled}
-      variant='standalone'
-    />
-  )
+export function useCheckinStatus(month: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...CHECKIN_STATUS_QUERY_KEY, month],
+    queryFn: async () => {
+      const response = await getCheckinStatus(month)
+      if (response.success && response.data) {
+        return response.data
+      }
+      throw new Error(
+        response.message || i18next.t('Failed to fetch checkin status')
+      )
+    },
+    enabled,
+    staleTime: 30000,
+  })
 }

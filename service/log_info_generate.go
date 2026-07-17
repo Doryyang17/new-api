@@ -162,6 +162,16 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 	if relayInfo.UserSetting.BillingPreference != "" {
 		other["billing_preference"] = relayInfo.UserSetting.BillingPreference
 	}
+	consumeTotal := relayInfo.CheckinBonusConsumed + relayInfo.OriginalFundingConsumed
+	if consumeTotal > 0 {
+		other["consume_total"] = consumeTotal
+	}
+	if relayInfo.CheckinBonusConsumed > 0 {
+		other["checkin_bonus_deducted"] = relayInfo.CheckinBonusConsumed
+	}
+	if relayInfo.OriginalFundingConsumed > 0 {
+		other["original_funding_deducted"] = relayInfo.OriginalFundingConsumed
+	}
 	if relayInfo.BillingSource == "subscription" {
 		if relayInfo.SubscriptionId != 0 {
 			other["subscription_id"] = relayInfo.SubscriptionId
@@ -202,6 +212,8 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 		}
 		// Wallet quota is not deducted when billed from subscription.
 		other["wallet_quota_deducted"] = 0
+	} else if relayInfo.OriginalFundingConsumed > 0 {
+		other["wallet_quota_deducted"] = relayInfo.OriginalFundingConsumed
 	}
 }
 
@@ -297,6 +309,7 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.Price
 		other["user_group_ratio"] = priceData.GroupRatioInfo.GroupSpecialRatio
 	}
 	appendRequestPath(nil, relayInfo, other)
+	appendBillingInfo(relayInfo, other)
 	return other
 }
 

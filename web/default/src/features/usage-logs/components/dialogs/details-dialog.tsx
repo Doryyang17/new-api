@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { TFunction } from 'i18next'
 import {
   Copy,
   Check,
@@ -31,7 +32,6 @@ import {
   Info,
   LogIn,
 } from 'lucide-react'
-import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
@@ -179,7 +179,9 @@ function getUsageBillingPathLabel(
   }
 }
 
-function isUsageBillingPathLocal(adminInfo: LogOtherData['admin_info']): boolean {
+function isUsageBillingPathLocal(
+  adminInfo: LogOtherData['admin_info']
+): boolean {
   if (adminInfo?.usage_billing_path) {
     return adminInfo.usage_billing_path === USAGE_BILLING_PATH.LOCAL
   }
@@ -469,6 +471,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const isTopup = props.log.type === 1
   const isManage = props.log.type === 3
   const isSubscription = other?.billing_source === 'subscription'
+  const hasBillingSplit =
+    isConsume &&
+    (other?.consume_total != null ||
+      other?.checkin_bonus_deducted != null ||
+      other?.original_funding_deducted != null)
   const isTieredBilling =
     isConsume &&
     !isViolation &&
@@ -1129,6 +1136,27 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 )}
             </DetailSection>
           )}
+
+        {/* Check-in bonus billing split */}
+        {hasBillingSplit && other && (
+          <DetailSection label='消费抵扣明细'>
+            <DetailRow
+              label='本次消费'
+              value={formatLogQuota(other.consume_total ?? props.log.quota)}
+              mono
+            />
+            <DetailRow
+              label='签到赠金抵扣'
+              value={formatLogQuota(other.checkin_bonus_deducted ?? 0)}
+              mono
+            />
+            <DetailRow
+              label={isSubscription ? '原订阅额度扣除' : '账户余额扣除'}
+              value={formatLogQuota(other.original_funding_deducted ?? 0)}
+              mono
+            />
+          </DetailSection>
+        )}
 
         {/* Subscription billing details */}
         {isSubscription && other && (

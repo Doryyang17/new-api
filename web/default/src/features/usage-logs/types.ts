@@ -205,6 +205,10 @@ export interface LogOtherData {
   is_system_prompt_overwritten?: boolean
   po?: string[]
   billing_source?: string
+  consume_total?: number
+  checkin_bonus_deducted?: number
+  original_funding_deducted?: number
+  wallet_quota_deducted?: number
   group?: string
   stream_status?: {
     status?: string

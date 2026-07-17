@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   CalendarDays,
   ChevronDown,
@@ -41,12 +41,16 @@ import {
   TooltipTrigger,
   TooltipProvider,
 } from '@/components/ui/tooltip'
+import {
+  CHECKIN_STATUS_QUERY_KEY,
+  formatBonusWindow,
+  performCheckin,
+  useCheckinStatus,
+  type CheckinRecord,
+} from '@/features/checkin'
 import { formatQuotaWithCurrency } from '@/lib/currency'
 import dayjs from '@/lib/dayjs'
 import { cn } from '@/lib/utils'
-
-import { getCheckinStatus, performCheckin } from '../api'
-import type { CheckinRecord } from '../types'
 
 interface CheckinCalendarCardProps {
   checkinEnabled: boolean
@@ -69,6 +73,7 @@ export function CheckinCalendarCard({
   const [turnstileWidgetKey, setTurnstileWidgetKey] = useState(0)
   const [initialLoaded, setInitialLoaded] = useState(false)
   const [collapsed, setCollapsed] = useState<boolean>(false)
+  const queryClient = useQueryClient()
 
   const currentMonthStr = useMemo(() => {
     const y = currentMonth.getFullYear()
@@ -76,39 +81,25 @@ export function CheckinCalendarCard({
     return `${y}-${m}`
   }, [currentMonth])
 
-  // Fetch checkin status
-  /* eslint-disable @tanstack/query/exhaustive-deps */
-  const {
-    data: checkinData,
-    isLoading,
-    refetch,
-  } = useQuery({
-    queryKey: ['checkin-status', currentMonthStr],
-    queryFn: async () => {
-      const res = await getCheckinStatus(currentMonthStr)
-      if (res.success && res.data) {
-        return res.data
-      }
-      throw new Error(res.message || t('Failed to fetch checkin status'))
-    },
-    enabled: checkinEnabled,
-    staleTime: 30000,
-  })
-  /* eslint-enable @tanstack/query/exhaustive-deps */
+  const { data: checkinData, isLoading } = useCheckinStatus(
+    currentMonthStr,
+    checkinEnabled
+  )
 
   const checkinRecordsMap = useMemo(() => {
-    const map: Record<string, number> = {}
+    const map: Record<string, CheckinRecord> = {}
     const records = checkinData?.stats?.records || []
     records.forEach((record: CheckinRecord) => {
-      map[record.checkin_date] = record.quota_awarded
+      map[record.checkin_date] = record
     })
     return map
   }, [checkinData?.stats?.records])
 
-  const monthlyQuota = useMemo(() => {
+  const monthlyReward = useMemo(() => {
     const records = checkinData?.stats?.records || []
     return records.reduce(
-      (sum: number, record: CheckinRecord) => sum + (record.quota_awarded || 0),
+      (sum: number, record: CheckinRecord) =>
+        sum + (record.quota_awarded || 0) + (record.bonus_awarded || 0),
       0
     )
   }, [checkinData?.stats?.records])
@@ -119,8 +110,10 @@ export function CheckinCalendarCard({
   }, [])
 
   const checkedToday = checkinData?.stats?.checked_in_today === true
-  const todayAward = checkinRecordsMap[todayString]
-
+  const todayRecord = checkinRecordsMap[todayString]
+  const todayAward = todayRecord
+    ? todayRecord.quota_awarded + (todayRecord.bonus_awarded ?? 0)
+    : undefined
   useEffect(() => {
     if (initialLoaded) return
     if (isLoading) return
@@ -144,10 +137,18 @@ export function CheckinCalendarCard({
       try {
         const res = await performCheckin(token)
         if (res.success && res.data) {
-          toast.success(
-            `${t('Check-in successful! Received')} ${formatQuotaWithCurrency(res.data.quota_awarded)}`
-          )
-          refetch()
+          if (res.data.bonus) {
+            toast.success(
+              `签到成功！获得签到赠金 ${formatQuotaWithCurrency(res.data.bonus.amount)}，有效时间 ${formatBonusWindow(res.data.bonus)}`
+            )
+          } else {
+            toast.success(
+              `${t('Check-in successful! Received')} ${formatQuotaWithCurrency(res.data.quota_awarded)}`
+            )
+          }
+          await queryClient.invalidateQueries({
+            queryKey: CHECKIN_STATUS_QUERY_KEY,
+          })
           setTurnstileModalVisible(false)
         } else {
           if (!token && shouldTriggerTurnstile(res.message)) {
@@ -169,7 +170,7 @@ export function CheckinCalendarCard({
         setCheckinLoading(false)
       }
     },
-    [refetch, shouldTriggerTurnstile, t, turnstileSiteKey]
+    [queryClient, shouldTriggerTurnstile, t, turnstileSiteKey]
   )
 
   const handlePrevMonth = () => {
@@ -347,7 +348,7 @@ export function CheckinCalendarCard({
               </div>
               <div className='bg-card p-3 text-center sm:p-5'>
                 <div className='text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
-                  {formatQuotaWithCurrency(monthlyQuota, { digitsLarge: 0 })}
+                  {formatQuotaWithCurrency(monthlyReward, { digitsLarge: 0 })}
                 </div>
                 <div className='text-muted-foreground mt-0.5 text-[10px] font-medium sm:mt-1 sm:text-xs'>
                   {t('This month')}
@@ -356,7 +357,7 @@ export function CheckinCalendarCard({
               <div className='bg-card p-3 text-center sm:p-5'>
                 <div className='text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
                   {formatQuotaWithCurrency(
-                    checkinData?.stats?.total_quota || 0,
+                    checkinData?.stats?.total_reward || 0,
                     {
                       digitsLarge: 0,
                     }
@@ -416,8 +417,12 @@ export function CheckinCalendarCard({
                       dayObj.date.getDate()
                     ).padStart(2, '0')}`
                     const isToday = dateStr === todayString
-                    const quotaAwarded = checkinRecordsMap[dateStr]
-                    const isCheckedIn = quotaAwarded !== undefined
+                    const checkinRecord = checkinRecordsMap[dateStr]
+                    const rewardAwarded = checkinRecord
+                      ? checkinRecord.quota_awarded +
+                        (checkinRecord.bonus_awarded ?? 0)
+                      : undefined
+                    const isCheckedIn = checkinRecord !== undefined
                     const dayNum = dayObj.date.getDate()
 
                     const dayButton = (
@@ -449,7 +454,10 @@ export function CheckinCalendarCard({
                                 {t('Checked in')}
                               </div>
                               <div className='text-muted-foreground mt-0.5'>
-                                +{formatQuotaWithCurrency(quotaAwarded)}
+                                {checkinRecord?.bonus_awarded
+                                  ? '签到赠金 '
+                                  : '+'}
+                                {formatQuotaWithCurrency(rewardAwarded || 0)}
                               </div>
                             </div>
                           </TooltipContent>
@@ -471,9 +479,13 @@ export function CheckinCalendarCard({
                     <li>
                       {t('Check in daily to receive random quota rewards')}
                     </li>
-                    <li>
-                      {t('Rewards will be added directly to your balance')}
-                    </li>
+                    {checkinData?.bonus_setting?.enabled ? (
+                      <li>
+                        当前使用签到赠金模式：不增加账户余额，当天有效并优先抵扣消费
+                      </li>
+                    ) : (
+                      <li>当前使用余额奖励模式：奖励直接加入账户余额</li>
+                    )}
                     <li>{t('Do not repeat check-in; only once per day')}</li>
                   </ul>
                 </div>

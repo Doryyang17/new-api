@@ -17,8 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
+import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { AvailabilitySection } from '../maintenance/availability-section'
 import { DailyUsageLimitSection } from '../maintenance/daily-usage-limit-section'
+import { SensitiveWordsSection } from '../request-limits/sensitive-words-section'
 import type { CustomSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 import { RegistrationCodesSection } from './registration-codes-section'
@@ -74,6 +76,68 @@ const CUSTOM_SECTIONS = [
           'availability_setting.message':
             settings['availability_setting.message'] ??
             '当前处于宵禁状态，22:00-8:00期间服务不可用，敬请谅解~',
+        }}
+      />
+    ),
+  },
+  {
+    id: 'prompt-filter',
+    titleKey: 'Prompt Filter',
+    build: (settings: CustomSettings) => (
+      <SensitiveWordsSection
+        defaultValues={{
+          CheckSensitiveEnabled: settings.CheckSensitiveEnabled,
+          CheckSensitiveOnPromptEnabled: settings.CheckSensitiveOnPromptEnabled,
+          SensitiveWords: settings.SensitiveWords,
+          'prompt_filter_setting.mode': settings['prompt_filter_setting.mode'],
+          'prompt_filter_setting.threshold':
+            settings['prompt_filter_setting.threshold'],
+          'prompt_filter_setting.strict_threshold':
+            settings['prompt_filter_setting.strict_threshold'],
+          'prompt_filter_setting.log_matches':
+            settings['prompt_filter_setting.log_matches'],
+          'prompt_filter_setting.max_text_length':
+            settings['prompt_filter_setting.max_text_length'],
+          'prompt_filter_setting.message':
+            settings['prompt_filter_setting.message'],
+          'prompt_filter_setting.block_status_code':
+            settings['prompt_filter_setting.block_status_code'],
+          'prompt_filter_setting.block_error_code':
+            settings['prompt_filter_setting.block_error_code'],
+          'prompt_filter_setting.group_whitelist':
+            settings['prompt_filter_setting.group_whitelist'],
+          'prompt_filter_setting.channel_whitelist':
+            settings['prompt_filter_setting.channel_whitelist'],
+          'prompt_filter_setting.custom_patterns':
+            settings['prompt_filter_setting.custom_patterns'],
+          'prompt_filter_setting.disabled_patterns':
+            settings['prompt_filter_setting.disabled_patterns'],
+          'prompt_filter_setting.review_enabled':
+            settings['prompt_filter_setting.review_enabled'],
+          'prompt_filter_setting.review_base_url':
+            settings['prompt_filter_setting.review_base_url'],
+          'prompt_filter_setting.review_model':
+            settings['prompt_filter_setting.review_model'],
+          'prompt_filter_setting.review_timeout_seconds':
+            settings['prompt_filter_setting.review_timeout_seconds'],
+          'prompt_filter_setting.review_fail_closed':
+            settings['prompt_filter_setting.review_fail_closed'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'checkin',
+    titleKey: 'Check-in Rewards',
+    build: (settings: CustomSettings) => (
+      <CheckinSettingsSection
+        defaultValues={{
+          enabled: settings['checkin_setting.enabled'],
+          minQuota: settings['checkin_setting.min_quota'],
+          maxQuota: settings['checkin_setting.max_quota'],
+          bonusEnabled: settings['checkin_bonus_setting.enabled'],
+          bonusMinAmount: settings['checkin_bonus_setting.min_amount'],
+          bonusMaxAmount: settings['checkin_bonus_setting.max_amount'],
         }}
       />
     ),

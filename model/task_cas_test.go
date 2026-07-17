@@ -47,11 +47,17 @@ func TestMain(m *testing.M) {
 		&SubscriptionPlan{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
+		&SubscriptionPreConsumeRecord{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
+		&Checkin{},
+		&CheckinBonus{},
+		&CheckinBonusUsage{},
+		&CheckinBonusProcessLease{},
+		&Midjourney{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -74,11 +80,17 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM subscription_orders")
 		DB.Exec("DELETE FROM subscription_plans")
 		DB.Exec("DELETE FROM user_subscriptions")
+		DB.Exec("DELETE FROM subscription_pre_consume_records")
 		DB.Exec("DELETE FROM user_oauth_bindings")
 		DB.Exec("DELETE FROM perf_metrics")
 		DB.Exec("DELETE FROM system_instances")
 		DB.Exec("DELETE FROM system_task_locks")
 		DB.Exec("DELETE FROM system_tasks")
+		DB.Exec("DELETE FROM checkin_bonus_usages")
+		DB.Exec("DELETE FROM checkin_bonus_process_leases")
+		DB.Exec("DELETE FROM checkin_bonuses")
+		DB.Exec("DELETE FROM checkins")
+		DB.Exec("DELETE FROM midjourneys")
 	})
 }
 

@@ -27,6 +27,10 @@ import {
   showWarning,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+import {
+  displayAmountToQuota,
+  quotaToDisplayAmount,
+} from '../../../helpers/quota';
 
 export default function SettingsCheckin(props) {
   const { t } = useTranslation();
@@ -35,6 +39,9 @@ export default function SettingsCheckin(props) {
     'checkin_setting.enabled': false,
     'checkin_setting.min_quota': 1000,
     'checkin_setting.max_quota': 10000,
+    'checkin_bonus_setting.enabled': false,
+    'checkin_bonus_setting.min_amount': 0.1,
+    'checkin_bonus_setting.max_amount': 1,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -46,12 +53,46 @@ export default function SettingsCheckin(props) {
   }
 
   function onSubmit() {
+    if (
+      inputs['checkin_bonus_setting.min_amount'] >
+      inputs['checkin_bonus_setting.max_amount']
+    ) {
+      return showError('最低签到赠金不能高于最高签到赠金');
+    }
     const updateArray = compareObjects(inputs, inputsRow);
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
-    const requestQueue = updateArray.map((item) => {
+    const bonusMinKey = 'checkin_bonus_setting.min_amount';
+    const bonusMaxKey = 'checkin_bonus_setting.max_amount';
+    const bonusUpdates = updateArray.filter(
+      (item) => item.key === bonusMinKey || item.key === bonusMaxKey,
+    );
+    const orderedUpdates = updateArray.filter(
+      (item) => item.key !== bonusMinKey && item.key !== bonusMaxKey,
+    );
+    if (
+      bonusUpdates.length === 2 &&
+      inputs[bonusMinKey] > inputsRow[bonusMaxKey]
+    ) {
+      orderedUpdates.push(
+        bonusUpdates.find((item) => item.key === bonusMaxKey),
+        bonusUpdates.find((item) => item.key === bonusMinKey),
+      );
+    } else {
+      orderedUpdates.push(
+        ...bonusUpdates.sort((a, b) =>
+          a.key === bonusMinKey ? -1 : b.key === bonusMinKey ? 1 : 0,
+        ),
+      );
+    }
+    const updateOption = (item) => {
       let value = '';
       if (typeof inputs[item.key] === 'boolean') {
         value = String(inputs[item.key]);
+      } else if (
+        item.key === 'checkin_bonus_setting.min_amount' ||
+        item.key === 'checkin_bonus_setting.max_amount'
+      ) {
+        value = String(displayAmountToQuota(inputs[item.key]));
       } else {
         value = String(inputs[item.key]);
       }
@@ -59,14 +100,22 @@ export default function SettingsCheckin(props) {
         key: item.key,
         value,
       });
-    });
+    };
     setLoading(true);
-    Promise.all(requestQueue)
-      .then((res) => {
-        if (requestQueue.length === 1) {
-          if (res.includes(undefined)) return;
-        } else if (requestQueue.length > 1) {
-          if (res.includes(undefined))
+    orderedUpdates
+      .reduce(
+        (chain, item) =>
+          chain.then(async (responses) => [
+            ...responses,
+            await updateOption(item),
+          ]),
+        Promise.resolve([]),
+      )
+      .then((responses) => {
+        if (orderedUpdates.length === 1) {
+          if (responses.includes(undefined)) return;
+        } else if (orderedUpdates.length > 1) {
+          if (responses.includes(undefined))
             return showError(t('部分保存失败，请重试'));
         }
         showSuccess(t('保存成功'));
@@ -84,7 +133,14 @@ export default function SettingsCheckin(props) {
     const currentInputs = {};
     for (let key in props.options) {
       if (Object.keys(inputs).includes(key)) {
-        currentInputs[key] = props.options[key];
+        if (
+          key === 'checkin_bonus_setting.min_amount' ||
+          key === 'checkin_bonus_setting.max_amount'
+        ) {
+          currentInputs[key] = quotaToDisplayAmount(props.options[key]);
+        } else {
+          currentInputs[key] = props.options[key];
+        }
       }
     }
     setInputs(currentInputs);
@@ -125,7 +181,10 @@ export default function SettingsCheckin(props) {
                   placeholder={t('签到奖励的最小额度')}
                   onChange={handleFieldChange('checkin_setting.min_quota')}
                   min={0}
-                  disabled={!inputs['checkin_setting.enabled']}
+                  disabled={
+                    !inputs['checkin_setting.enabled'] ||
+                    inputs['checkin_bonus_setting.enabled']
+                  }
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
@@ -135,7 +194,68 @@ export default function SettingsCheckin(props) {
                   placeholder={t('签到奖励的最大额度')}
                   onChange={handleFieldChange('checkin_setting.max_quota')}
                   min={0}
+                  disabled={
+                    !inputs['checkin_setting.enabled'] ||
+                    inputs['checkin_bonus_setting.enabled']
+                  }
+                />
+              </Col>
+            </Row>
+            <Typography.Text
+              strong
+              style={{ marginTop: 20, marginBottom: 8, display: 'block' }}
+            >
+              独立签到赠金
+            </Typography.Text>
+            <Typography.Text
+              type='tertiary'
+              style={{ marginBottom: 16, display: 'block' }}
+            >
+              开启后仅发放独立赠金，不再发放账户余额奖励；赠金当天 24:00
+              自动失效并优先抵扣消费
+            </Typography.Text>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'checkin_bonus_setting.enabled'}
+                  label='启用签到赠金'
+                  size='default'
+                  checkedText='｜'
+                  uncheckedText='〇'
+                  onChange={handleFieldChange('checkin_bonus_setting.enabled')}
                   disabled={!inputs['checkin_setting.enabled']}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'checkin_bonus_setting.min_amount'}
+                  label='最低赠金金额'
+                  placeholder='0.1'
+                  onChange={handleFieldChange(
+                    'checkin_bonus_setting.min_amount',
+                  )}
+                  min={0}
+                  step={0.01}
+                  disabled={
+                    !inputs['checkin_setting.enabled'] ||
+                    !inputs['checkin_bonus_setting.enabled']
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'checkin_bonus_setting.max_amount'}
+                  label='最高赠金金额'
+                  placeholder='1'
+                  onChange={handleFieldChange(
+                    'checkin_bonus_setting.max_amount',
+                  )}
+                  min={0}
+                  step={0.01}
+                  disabled={
+                    !inputs['checkin_setting.enabled'] ||
+                    !inputs['checkin_bonus_setting.enabled']
+                  }
                 />
               </Col>
             </Row>

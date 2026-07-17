@@ -120,7 +120,7 @@ type midjourneyPollHandler struct{}
 func (midjourneyPollHandler) Type() string { return model.SystemTaskTypeMidjourneyPoll }
 
 func (midjourneyPollHandler) Enabled() bool {
-	return constant.UpdateTask && model.HasUnfinishedMidjourneyTasks()
+	return constant.UpdateTask && model.HasUnfinishedMidjourneyTasks(midjourneyBillingPendingBefore())
 }
 
 func (midjourneyPollHandler) Interval() time.Duration { return 15 * time.Second }

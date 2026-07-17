@@ -49,8 +49,13 @@ func TestMain(m *testing.M) {
 		&model.SystemDailyUsageCounter{},
 		&model.TopUp{},
 		&model.UserSubscription{},
+		&model.SubscriptionPlan{},
+		&model.SubscriptionPreConsumeRecord{},
 		&model.SystemTask{},
 		&model.SystemTaskLock{},
+		&model.CheckinBonus{},
+		&model.CheckinBonusUsage{},
+		&model.CheckinBonusProcessLease{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -74,8 +79,13 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM system_daily_usage_counters")
 		model.DB.Exec("DELETE FROM top_ups")
 		model.DB.Exec("DELETE FROM user_subscriptions")
+		model.DB.Exec("DELETE FROM subscription_pre_consume_records")
+		model.DB.Exec("DELETE FROM subscription_plans")
 		model.DB.Exec("DELETE FROM system_task_locks")
 		model.DB.Exec("DELETE FROM system_tasks")
+		model.DB.Exec("DELETE FROM checkin_bonus_usages")
+		model.DB.Exec("DELETE FROM checkin_bonus_process_leases")
+		model.DB.Exec("DELETE FROM checkin_bonuses")
 	})
 }
 
@@ -200,7 +210,7 @@ func TestPriceDataReplaceAndApplyOtherRatios(t *testing.T) {
 }
 
 func TestTaskBillingOtherFiltersHistoricalOtherRatios(t *testing.T) {
-	task := makeTask(1, 1, 100, 0, BillingSourceWallet, 0)
+	task := makeTask(1, 1, 100, 0, BillingSourceSubscription, 42)
 	task.PrivateData.BillingContext.OtherRatios = map[string]float64{
 		"seconds":  2,
 		"identity": 1,
@@ -212,6 +222,8 @@ func TestTaskBillingOtherFiltersHistoricalOtherRatios(t *testing.T) {
 
 	other := taskBillingOther(task)
 
+	assert.Equal(t, BillingSourceSubscription, other["billing_source"])
+	assert.Equal(t, 42, other["subscription_id"])
 	assert.Equal(t, 2.0, other["seconds"])
 	assert.Equal(t, 1.0, other["identity"])
 	assert.NotContains(t, other, "zero")
@@ -362,6 +374,32 @@ func TestRefundTaskQuota_Subscription(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestRefundTaskQuota_RestoresBonusAndWalletSplit(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	const userID, tokenID, channelID = 21, 21, 21
+	const requestID = "task-bonus-refund"
+
+	seedUser(t, userID, 80)
+	seedToken(t, tokenID, userID, "sk-task-bonus-refund", 50)
+	seedChannel(t, channelID)
+	bonus := seedFundingBonus(t, userID, 30, time.Now().Add(time.Hour))
+	reserved, err := model.ReserveCheckinBonus(userID, requestID, 30, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, 30, reserved)
+	require.NoError(t, model.SettleCheckinBonusUsage(requestID, reserved, time.Now()))
+
+	task := makeTask(userID, channelID, 50, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.BillingRequestId = requestID
+	task.PrivateData.CheckinBonusConsumed = 30
+	RefundTaskQuota(ctx, task, "task failed")
+
+	assert.Equal(t, 100, getUserQuota(t, userID))
+	assert.Equal(t, 100, getTokenRemainQuota(t, tokenID))
+	require.NoError(t, model.DB.First(bonus, bonus.Id).Error)
+	assert.Equal(t, 30, bonus.RemainingAmount)
 }
 
 func TestRefundTaskQuota_ZeroQuota(t *testing.T) {

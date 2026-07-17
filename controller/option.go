@@ -433,6 +433,13 @@ func UpdateOption(c *gin.Context) {
 		})
 		return
 	}
+	if err := operation_setting.ValidateCheckinBonusOption(option.Key, option.Value.(string)); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
 	if strings.HasPrefix(option.Key, "daily_usage_setting.") {
 		prospective := system_setting.GetDailyUsageLimitSettings()
 		switch option.Key {

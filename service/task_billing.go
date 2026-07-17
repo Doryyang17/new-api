@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -54,6 +55,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = info.UpstreamModelName
 	}
+	appendBillingInfo(info, other)
 	attachQuotaSaturation(c, info, other)
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
@@ -91,7 +93,28 @@ func taskIsSubscription(task *model.Task) bool {
 
 // taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
 func taskAdjustFunding(task *model.Task, delta int) error {
-	if taskIsSubscription(task) {
+	if task.PrivateData.BillingSource == BillingSourceSubscription {
+		if task.PrivateData.SubscriptionId == 0 {
+			if delta <= 0 {
+				return fmt.Errorf("subscription id is missing for task refund")
+			}
+			requestId := task.PrivateData.BillingRequestId
+			if requestId == "" {
+				requestId = task.TaskID
+			}
+			result, err := model.PreConsumeUserSubscription(
+				requestId,
+				task.UserId,
+				taskModelName(task),
+				0,
+				int64(delta),
+			)
+			if err != nil {
+				return err
+			}
+			task.PrivateData.SubscriptionId = result.UserSubscriptionId
+			return nil
+		}
 		return model.PostConsumeUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
 	}
 	if delta > 0 {
@@ -124,6 +147,28 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 // taskBillingOther 从 task 的 BillingContext 构建日志 Other 字段。
 func taskBillingOther(task *model.Task) map[string]interface{} {
 	other := make(map[string]interface{})
+	if task.PrivateData.BillingSource != "" {
+		other["billing_source"] = task.PrivateData.BillingSource
+	}
+	if task.PrivateData.SubscriptionId > 0 {
+		other["subscription_id"] = task.PrivateData.SubscriptionId
+	}
+	if task.Quota > 0 {
+		other["consume_total"] = task.Quota
+	}
+	if task.PrivateData.CheckinBonusConsumed > 0 {
+		other["checkin_bonus_deducted"] = task.PrivateData.CheckinBonusConsumed
+	}
+	originalConsumed := task.Quota - task.PrivateData.CheckinBonusConsumed
+	if originalConsumed > 0 {
+		other["original_funding_deducted"] = originalConsumed
+		if taskIsSubscription(task) {
+			other["subscription_consumed"] = originalConsumed
+			other["wallet_quota_deducted"] = 0
+		} else {
+			other["wallet_quota_deducted"] = originalConsumed
+		}
+	}
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		other["model_price"] = bc.ModelPrice
 		if bc.ModelRatio > 0 {
@@ -215,16 +260,34 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 		return
 	}
 
-	// 1. 退还资金来源（钱包或订阅）
-	if err := taskAdjustFunding(task, -quota); err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
+	bonusConsumed := min(task.PrivateData.CheckinBonusConsumed, quota)
+	originalConsumed := quota - bonusConsumed
+
+	// 1. 优先通过请求账本原子退还赠金与原资金来源，避免任一侧成功、另一侧失败。
+	_, _, _, tokenHandled, handled, err := model.RefundCheckinBonusFundingUsage(task.PrivateData.BillingRequestId, time.Now())
+	if err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("退还任务资金失败 task %s: %s", task.TaskID, err.Error()))
 		return
 	}
+	if !handled && originalConsumed > 0 {
+		if err := taskAdjustFunding(task, -originalConsumed); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
+			return
+		}
+	}
+	if !handled && bonusConsumed > 0 {
+		if _, err := model.RefundCheckinBonusUsage(task.PrivateData.BillingRequestId, time.Now()); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("退还签到赠金失败 task %s: %s", task.TaskID, err.Error()))
+			return
+		}
+	}
 
-	// 2. 退还令牌额度
-	taskAdjustTokenQuota(ctx, task, -quota)
+	// 3. 新账本会在同一事务中退还令牌；旧任务没有令牌账本时走兼容路径。
+	if !tokenHandled {
+		taskAdjustTokenQuota(ctx, task, -quota)
+	}
 
-	// 3. 记录日志
+	// 4. 记录日志
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
 	other["reason"] = reason
@@ -239,6 +302,25 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 		Group:     task.Group,
 		Other:     other,
 	})
+}
+
+func adjustTaskFundingWithCheckinBonus(task *model.Task, quotaDelta int) error {
+	if quotaDelta == 0 {
+		return nil
+	}
+	bonusDelta, _, handled, err := model.AdjustSettledCheckinBonusFundingUsage(
+		task.PrivateData.BillingRequestId,
+		quotaDelta,
+		time.Now(),
+	)
+	if err != nil {
+		return err
+	}
+	if handled {
+		task.PrivateData.CheckinBonusConsumed += bonusDelta
+		return nil
+	}
+	return taskAdjustFunding(task, quotaDelta)
 }
 
 // RecalculateTaskQuota 通用的异步差额结算。
@@ -267,7 +349,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	))
 
 	// 调整资金来源
-	if err := taskAdjustFunding(task, quotaDelta); err != nil {
+	if err := adjustTaskFundingWithCheckinBonus(task, quotaDelta); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
 		return
 	}

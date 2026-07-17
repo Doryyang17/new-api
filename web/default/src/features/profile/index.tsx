@@ -50,12 +50,16 @@ export function Profile() {
       <div className='min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-4 sm:py-6'>
         <CardStaggerContainer className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-6'>
           <CardStaggerItem>
-            <ProfileHeader profile={profile} loading={loading} />
+            <ProfileHeader
+              profile={profile}
+              loading={loading}
+              checkinEnabled={checkinEnabled}
+            />
           </CardStaggerItem>
 
           <CardStaggerItem>
             <div className='grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.46fr)] xl:items-start'>
-              <div className='space-y-4 sm:space-y-6'>
+              <div className='order-2 space-y-4 sm:space-y-6 xl:order-1'>
                 <ProfileSettingsCard
                   profile={profile}
                   loading={loading}
@@ -64,17 +68,21 @@ export function Profile() {
                 <ProfileSecurityCard profile={profile} loading={loading} />
               </div>
 
-              <div className='space-y-4 sm:space-y-6 xl:sticky xl:top-6'>
+              <div className='contents xl:sticky xl:top-6 xl:order-2 xl:block xl:space-y-6 xl:self-start'>
                 {checkinEnabled && (
-                  <CheckinCalendarCard
-                    checkinEnabled={checkinEnabled}
-                    turnstileEnabled={turnstileEnabled}
-                    turnstileSiteKey={turnstileSiteKey}
-                  />
+                  <div className='order-1'>
+                    <CheckinCalendarCard
+                      checkinEnabled={checkinEnabled}
+                      turnstileEnabled={turnstileEnabled}
+                      turnstileSiteKey={turnstileSiteKey}
+                    />
+                  </div>
                 )}
-                {canConfigureSidebar && <SidebarModulesCard />}
-                <PasskeyCard loading={loading} />
-                <TwoFACard loading={loading} />
+                <div className='order-3 space-y-4 sm:space-y-6'>
+                  {canConfigureSidebar && <SidebarModulesCard />}
+                  <PasskeyCard loading={loading} />
+                  <TwoFACard loading={loading} />
+                </div>
               </div>
             </div>
           </CardStaggerItem>

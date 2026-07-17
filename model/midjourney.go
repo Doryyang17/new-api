@@ -23,6 +23,47 @@ type Midjourney struct {
 	Quota       int    `json:"quota"`
 	Buttons     string `json:"buttons"`
 	Properties  string `json:"properties"`
+	// Internal billing split used by async failure refunds. Never expose these
+	// fields through task APIs.
+	BillingRequestId     string `json:"-" gorm:"type:varchar(191);index"`
+	BillingSource        string `json:"-" gorm:"type:varchar(20)"`
+	SubscriptionId       int    `json:"-"`
+	CheckinBonusConsumed int    `json:"-"`
+	TokenId              int    `json:"-"`
+	BillingStatus        string `json:"-" gorm:"type:varchar(20);index"`
+	BillingPendingAt     int64  `json:"-" gorm:"index"`
+}
+
+const (
+	MidjourneyBillingStatusPending  = "pending"
+	MidjourneyBillingStatusCharged  = "charged"
+	MidjourneyBillingStatusRefunded = "refunded"
+	MidjourneyBillingStatusFailed   = "failed"
+)
+
+func UpdateMidjourneyBillingStatus(taskId int, fromStatus string, toStatus string) (bool, error) {
+	result := DB.Model(&Midjourney{}).
+		Where("id = ? AND billing_status = ?", taskId, fromStatus).
+		Update("billing_status", toStatus)
+	return result.RowsAffected > 0, result.Error
+}
+
+// FailPendingMidjourneyBilling closes a task that reached the upstream but
+// could not be charged. The pending guard prevents a concurrent successful
+// charge from being overwritten by the recovery path.
+func FailPendingMidjourneyBilling(taskId int, reason string) (bool, error) {
+	result := DB.Model(&Midjourney{}).
+		Where("id = ? AND billing_status = ?", taskId, MidjourneyBillingStatusPending).
+		Updates(map[string]interface{}{
+			"code":               4,
+			"quota":              0,
+			"status":             "FAILURE",
+			"progress":           "100%",
+			"fail_reason":        reason,
+			"billing_status":     MidjourneyBillingStatusFailed,
+			"billing_pending_at": 0,
+		})
+	return result.RowsAffected > 0, result.Error
 }
 
 // TaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段
@@ -90,11 +131,19 @@ func GetAllTasks(startIdx int, num int, queryParams TaskQueryParams) []*Midjourn
 	return tasks
 }
 
-func GetAllUnFinishTasks() []*Midjourney {
+// GetAllUnFinishTasks returns regular unfinished tasks plus billing-pending
+// rows whose grace period has elapsed. Fresh pending rows are omitted so the
+// poller cannot race the request that is still committing its charge.
+func GetAllUnFinishTasks(pendingBefore int64) []*Midjourney {
 	var tasks []*Midjourney
 	var err error
-	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Find(&tasks).Error
+	err = DB.Where(
+		"(progress != ? AND (billing_status IS NULL OR billing_status != ?)) OR (billing_status = ? AND (billing_pending_at IS NULL OR billing_pending_at = 0 OR billing_pending_at <= ?))",
+		"100%",
+		MidjourneyBillingStatusPending,
+		MidjourneyBillingStatusPending,
+		pendingBefore,
+	).Find(&tasks).Error
 	if err != nil {
 		return nil
 	}
@@ -105,10 +154,16 @@ func GetAllUnFinishTasks() []*Midjourney {
 // still in progress. It is a cheap existence check (LIMIT 1) used to decide
 // whether the midjourney_poll system task needs to run; when no task is pending
 // the scheduler skips creating a row entirely.
-func HasUnfinishedMidjourneyTasks() bool {
+func HasUnfinishedMidjourneyTasks(pendingBefore int64) bool {
 	var id int
 	err := DB.Model(&Midjourney{}).
-		Where("progress != ?", "100%").
+		Where(
+			"(progress != ? AND (billing_status IS NULL OR billing_status != ?)) OR (billing_status = ? AND (billing_pending_at IS NULL OR billing_pending_at = 0 OR billing_pending_at <= ?))",
+			"100%",
+			MidjourneyBillingStatusPending,
+			MidjourneyBillingStatusPending,
+			pendingBefore,
+		).
 		Limit(1).
 		Pluck("id", &id).Error
 	return err == nil && id != 0

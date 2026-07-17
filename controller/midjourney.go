@@ -19,6 +19,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const midjourneyBillingPendingGrace = 2 * time.Minute
+
+func midjourneyBillingPendingBefore() int64 {
+	return time.Now().Add(-midjourneyBillingPendingGrace).UnixMilli()
+}
+
 // midjourneyPollSummary is the result recorded on a midjourney_poll system task
 // row, summarizing one polling pass.
 type midjourneyPollSummary struct {
@@ -37,7 +43,7 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		ctx = context.Background()
 	}
 
-	tasks := model.GetAllUnFinishTasks()
+	tasks := model.GetAllUnFinishTasks(midjourneyBillingPendingBefore())
 	if len(tasks) == 0 {
 		return summary
 	}
@@ -48,6 +54,15 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 	taskM := make(map[string]*model.Midjourney)
 	nullTaskIds := make([]int, 0)
 	for _, task := range tasks {
+		if task.BillingStatus == model.MidjourneyBillingStatusPending {
+			failed, err := model.FailPendingMidjourneyBilling(task.Id, "任务计费未完成，请重新提交")
+			if err != nil {
+				logger.LogError(ctx, fmt.Sprintf("fail to close pending midjourney billing task %d: %v", task.Id, err))
+			} else if failed {
+				logger.LogWarn(ctx, fmt.Sprintf("closed uncharged pending midjourney task %d", task.Id))
+			}
+			continue
+		}
 		if task.MjId == "" {
 			// 统计失败的未完成任务
 			nullTaskIds = append(nullTaskIds, task.Id)
@@ -166,7 +181,8 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 			if !checkMjTaskNeedUpdate(task, responseItem) {
 				continue
 			}
-			preStatus := task.Status
+			preTask := *task
+			preStatus := preTask.Status
 			task.Code = 1
 			task.Progress = responseItem.Progress
 			task.PromptEn = responseItem.PromptEn
@@ -205,7 +221,10 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 			if (task.Progress != "100%" && responseItem.FailReason != "") || (task.Progress == "100%" && task.Status == "FAILURE") {
 				logger.LogInfo(ctx, task.MjId+" 构建失败，"+task.FailReason)
 				task.Progress = "100%"
-				if task.Quota != 0 {
+				if task.Quota != 0 &&
+					task.BillingStatus != model.MidjourneyBillingStatusPending &&
+					task.BillingStatus != model.MidjourneyBillingStatusRefunded &&
+					task.BillingStatus != model.MidjourneyBillingStatusFailed {
 					shouldReturnQuota = true
 				}
 			}
@@ -213,9 +232,63 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 			if err != nil {
 				logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
 			} else if won && shouldReturnQuota {
-				err = model.IncreaseUserQuota(task.UserId, task.Quota, false)
-				if err != nil {
-					logger.LogError(ctx, "fail to increase user quota: "+err.Error())
+				restoreForRetry := func() {
+					failedStatus := task.Status
+					*task = preTask
+					if restored, restoreErr := task.UpdateWithStatus(failedStatus); restoreErr != nil || !restored {
+						logger.LogError(ctx, fmt.Sprintf("fail to restore task status for refund retry: restored=%t error=%v", restored, restoreErr))
+					}
+				}
+				bonusRefund := min(task.CheckinBonusConsumed, task.Quota)
+				originalRefund := task.Quota - bonusRefund
+				refundedBonus, refundedOriginal, _, tokenHandled, handled, refundErr := model.RefundCheckinBonusFundingUsage(task.BillingRequestId, time.Now())
+				if refundErr != nil {
+					logger.LogError(ctx, "fail to atomically refund task funding: "+refundErr.Error())
+					restoreForRetry()
+					continue
+				}
+				if handled {
+					if refundedBonus+refundedOriginal > 0 {
+						bonusRefund = refundedBonus
+						originalRefund = refundedOriginal
+					}
+				} else if originalRefund > 0 {
+					if task.BillingSource == service.BillingSourceSubscription && task.SubscriptionId > 0 {
+						err = model.PostConsumeUserSubscriptionDelta(task.SubscriptionId, -int64(originalRefund))
+					} else {
+						err = model.IncreaseUserQuota(task.UserId, originalRefund, false)
+					}
+					if err != nil {
+						logger.LogError(ctx, "fail to refund original funding: "+err.Error())
+						restoreForRetry()
+						continue
+					}
+					if bonusRefund > 0 {
+						_, err = model.RefundCheckinBonusUsage(task.BillingRequestId, time.Now())
+					}
+					if err != nil {
+						logger.LogError(ctx, "fail to refund check-in bonus: "+err.Error())
+						restoreForRetry()
+						continue
+					}
+				}
+				if !tokenHandled && task.TokenId > 0 {
+					if token, tokenErr := model.GetTokenById(task.TokenId); tokenErr == nil {
+						if tokenErr = model.IncreaseTokenQuota(task.TokenId, token.Key, task.Quota); tokenErr != nil {
+							logger.LogError(ctx, "fail to refund token quota: "+tokenErr.Error())
+							restoreForRetry()
+							continue
+						}
+					} else {
+						logger.LogError(ctx, "fail to load token for quota refund: "+tokenErr.Error())
+						restoreForRetry()
+						continue
+					}
+				}
+				if task.BillingStatus == model.MidjourneyBillingStatusCharged {
+					if _, statusErr := model.UpdateMidjourneyBillingStatus(task.Id, model.MidjourneyBillingStatusCharged, model.MidjourneyBillingStatusRefunded); statusErr != nil {
+						logger.LogError(ctx, "fail to mark midjourney billing refunded: "+statusErr.Error())
+					}
 				}
 				model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 					UserId:    task.UserId,
@@ -225,8 +298,13 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 					ModelName: service.CovertMjpActionToModelName(task.Action),
 					Quota:     task.Quota,
 					Other: map[string]interface{}{
-						"task_id": task.MjId,
-						"reason":  "构图失败",
+						"task_id":                   task.MjId,
+						"reason":                    "构图失败",
+						"billing_source":            task.BillingSource,
+						"subscription_id":           task.SubscriptionId,
+						"consume_total":             task.Quota,
+						"checkin_bonus_deducted":    bonusRefund,
+						"original_funding_deducted": originalRefund,
 					},
 				})
 			}

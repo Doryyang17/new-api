@@ -16,25 +16,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AccountBalanceSummary } from '@/features/checkin'
+import { api } from '@/lib/api'
 
-import type { UserWalletData } from '../types'
+import type {
+  ApiResponse,
+  CheckinResponse,
+  CheckinStatusResponse,
+} from './types'
 
-interface WalletStatsCardProps {
-  user: UserWalletData | null
-  loading?: boolean
-  checkinEnabled: boolean
+export async function getCheckinStatus(
+  month: string
+): Promise<ApiResponse<CheckinStatusResponse>> {
+  const res = await api.get(`/api/user/checkin?month=${month}`)
+  return res.data
 }
 
-export function WalletStatsCard(props: WalletStatsCardProps) {
-  return (
-    <AccountBalanceSummary
-      balance={props.user?.quota ?? 0}
-      usedQuota={props.user?.used_quota ?? 0}
-      requestCount={props.user?.request_count ?? 0}
-      loading={props.loading === true}
-      checkinEnabled={props.checkinEnabled}
-      variant='standalone'
-    />
-  )
+export async function performCheckin(
+  turnstileToken?: string
+): Promise<ApiResponse<CheckinResponse>> {
+  const url = turnstileToken
+    ? `/api/user/checkin?turnstile=${encodeURIComponent(turnstileToken)}`
+    : '/api/user/checkin'
+  const res = await api.post(url)
+  return res.data
 }

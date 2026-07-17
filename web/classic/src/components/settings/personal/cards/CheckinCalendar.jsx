@@ -42,10 +42,14 @@ import { API, showError, showSuccess, renderQuota } from '../../../../helpers';
 const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
   const [loading, setLoading] = useState(false);
   const [checkinLoading, setCheckinLoading] = useState(false);
+  const [nowUnix, setNowUnix] = useState(() => Math.floor(Date.now() / 1000));
   const [turnstileModalVisible, setTurnstileModalVisible] = useState(false);
   const [turnstileWidgetKey, setTurnstileWidgetKey] = useState(0);
   const [checkinData, setCheckinData] = useState({
     enabled: false,
+    bonus_setting: { enabled: false, min_amount: 0, max_amount: 0 },
+    active_bonus: null,
+    latest_bonus: null,
     stats: {
       checked_in_today: false,
       total_checkins: 0,
@@ -62,21 +66,61 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
   // 折叠状态：null 表示未确定（等待首次加载）
   const [isCollapsed, setIsCollapsed] = useState(null);
 
+  const activeBonus = checkinData.active_bonus;
+  const latestBonus = checkinData.latest_bonus;
+  const activeBonusExpireAt = activeBonus?.expire_at;
+  const bonusIsActive =
+    activeBonus?.status === 'active' &&
+    activeBonusExpireAt != null &&
+    activeBonusExpireAt > nowUnix;
+  const showBonusStatus =
+    checkinData.bonus_setting?.enabled ||
+    bonusIsActive ||
+    (latestBonus?.expire_at ?? 0) > nowUnix;
+
+  useEffect(() => {
+    if (activeBonusExpireAt == null) return undefined;
+    const timer = window.setInterval(() => {
+      setNowUnix(Math.floor(Date.now() / 1000));
+    }, 60000);
+    return () => window.clearInterval(timer);
+  }, [activeBonusExpireAt]);
+
+  const formatBonusWindow = (bonus) => {
+    const created = new Date(bonus.created_at * 1000);
+    const hours = String(created.getHours()).padStart(2, '0');
+    const minutes = String(created.getMinutes()).padStart(2, '0');
+    return `今天 ${hours}:${minutes} - 24:00`;
+  };
+
+  const formatBonusRemaining = (expireAt) => {
+    const remainingSeconds = Math.max(0, expireAt - nowUnix);
+    if (remainingSeconds === 0) return '已失效';
+    const hours = Math.floor(remainingSeconds / 3600);
+    const minutes = Math.ceil((remainingSeconds % 3600) / 60);
+    if (hours === 0) return `${minutes} 分钟`;
+    if (minutes === 0 || minutes === 60) {
+      return `${hours + (minutes === 60 ? 1 : 0)} 小时`;
+    }
+    return `${hours} 小时 ${minutes} 分钟`;
+  };
+
   // 创建日期到额度的映射，方便快速查找
   const checkinRecordsMap = useMemo(() => {
     const map = {};
     const records = checkinData.stats?.records || [];
     records.forEach((record) => {
-      map[record.checkin_date] = record.quota_awarded;
+      map[record.checkin_date] = record;
     });
     return map;
   }, [checkinData.stats?.records]);
 
   // 计算本月获得的额度
-  const monthlyQuota = useMemo(() => {
+  const monthlyReward = useMemo(() => {
     const records = checkinData.stats?.records || [];
     return records.reduce(
-      (sum, record) => sum + (record.quota_awarded || 0),
+      (sum, record) =>
+        sum + (record.quota_awarded || 0) + (record.bonus_awarded || 0),
       0,
     );
   }, [checkinData.stats?.records]);
@@ -132,9 +176,15 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
       const res = await postCheckin(token);
       const { success, data, message } = res.data;
       if (success) {
-        showSuccess(
-          t('签到成功！获得') + ' ' + renderQuota(data.quota_awarded),
-        );
+        if (data.bonus) {
+          showSuccess(
+            `签到成功！获得签到赠金 ${renderQuota(data.bonus.amount)}，有效时间 ${formatBonusWindow(data.bonus)}`,
+          );
+        } else {
+          showSuccess(
+            t('签到成功！获得') + ' ' + renderQuota(data.quota_awarded),
+          );
+        }
         // 刷新签到状态
         fetchCheckinStatus(currentMonth);
         setTurnstileModalVisible(false);
@@ -183,13 +233,16 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     const formattedDate = `${year}-${month}-${day}`; // YYYY-MM-DD
-    const quotaAwarded = checkinRecordsMap[formattedDate];
-    const isCheckedIn = quotaAwarded !== undefined;
+    const checkinRecord = checkinRecordsMap[formattedDate];
+    const rewardAwarded = checkinRecord
+      ? (checkinRecord.quota_awarded || 0) + (checkinRecord.bonus_awarded || 0)
+      : undefined;
+    const isCheckedIn = checkinRecord !== undefined;
 
     if (isCheckedIn) {
       return (
         <Tooltip
-          content={`${t('获得')} ${renderQuota(quotaAwarded)}`}
+          content={`${checkinRecord?.bonus_awarded ? '签到赠金' : t('获得')} ${renderQuota(rewardAwarded)}`}
           position='top'
         >
           <div className='absolute inset-0 flex flex-col items-center justify-center cursor-pointer'>
@@ -197,7 +250,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
               <Check size={14} className='text-white' strokeWidth={3} />
             </div>
             <div className='text-[10px] font-medium text-green-600 dark:text-green-400 leading-none'>
-              {renderQuota(quotaAwarded)}
+              {renderQuota(rewardAwarded)}
             </div>
           </div>
         </Tooltip>
@@ -286,6 +339,35 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
         </Button>
       </div>
 
+      {showBonusStatus && (
+        <div className='mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30'>
+          {bonusIsActive && activeBonus ? (
+            <div className='flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between'>
+              <div>
+                <div className='font-medium text-amber-700 dark:text-amber-300'>
+                  签到赠金：{renderQuota(activeBonus.remaining_amount)}
+                </div>
+                <div className='text-xs text-gray-500'>
+                  {formatBonusWindow(activeBonus)}，消费时优先抵扣
+                </div>
+              </div>
+              <div className='text-xs font-medium text-amber-700 dark:text-amber-300'>
+                剩余有效时间：{formatBonusRemaining(activeBonus.expire_at)}
+              </div>
+            </div>
+          ) : latestBonus?.status === 'expired' ||
+            (latestBonus && latestBonus.expire_at <= nowUnix) ? (
+            <div className='text-sm text-gray-500'>签到赠金已失效</div>
+          ) : latestBonus?.status === 'consumed' ? (
+            <div className='text-sm text-gray-500'>今日签到赠金已用完</div>
+          ) : (
+            <div className='text-sm text-gray-500'>
+              签到后可获得当日有效、消费优先抵扣的独立赠金
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 可折叠内容 */}
       <Collapsible isOpen={isCollapsed === false} keepDOM>
         {/* 签到统计 */}
@@ -298,13 +380,13 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           </div>
           <div className='text-center p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
             <div className='text-xl font-bold text-orange-600'>
-              {renderQuota(monthlyQuota, 6)}
+              {renderQuota(monthlyReward, 6)}
             </div>
             <div className='text-xs text-gray-500'>{t('本月获得')}</div>
           </div>
           <div className='text-center p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
             <div className='text-xl font-bold text-blue-600'>
-              {renderQuota(checkinData.stats?.total_quota || 0, 6)}
+              {renderQuota(checkinData.stats?.total_reward || 0, 6)}
             </div>
             <div className='text-xs text-gray-500'>{t('累计获得')}</div>
           </div>
@@ -371,7 +453,13 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           <Typography.Text type='tertiary' className='text-xs'>
             <ul className='list-disc list-inside space-y-0.5'>
               <li>{t('每日签到可获得随机额度奖励')}</li>
-              <li>{t('签到奖励将直接添加到您的账户余额')}</li>
+              {checkinData.bonus_setting?.enabled ? (
+                <li>
+                  当前使用签到赠金模式：不增加账户余额，当天有效并优先抵扣消费
+                </li>
+              ) : (
+                <li>当前使用余额奖励模式：奖励直接加入账户余额</li>
+              )}
               <li>{t('每日仅可签到一次，请勿重复签到')}</li>
             </ul>
           </Typography.Text>

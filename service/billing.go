@@ -76,11 +76,14 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		}
 
 		// 发送额度通知（订阅计费使用订阅剩余额度）
-		if actualQuota != 0 {
+		if relayInfo.OriginalFundingConsumed > 0 {
 			if relayInfo.BillingSource == BillingSourceSubscription {
 				checkAndSendSubscriptionQuotaNotify(relayInfo)
 			} else {
-				checkAndSendQuotaNotify(relayInfo, actualQuota-preConsumed, preConsumed)
+				// The wallet warning must only account for the portion actually
+				// deducted from the wallet. A bonus-only request must not make the
+				// unchanged wallet look closer to exhaustion.
+				checkAndSendQuotaNotify(relayInfo, relayInfo.OriginalFundingConsumed, 0)
 			}
 		}
 		return nil

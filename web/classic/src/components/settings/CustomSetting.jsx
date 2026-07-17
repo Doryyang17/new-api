@@ -20,6 +20,8 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect, useState } from 'react';
 import { Card, Spin } from '@douyinfe/semi-ui';
 import SettingsAvailability from '../../pages/Setting/Operation/SettingsAvailability';
+import SettingsSensitiveWords from '../../pages/Setting/Operation/SettingsSensitiveWords';
+import SettingsCheckin from '../../pages/Setting/Operation/SettingsCheckin';
 import { API, showError, toBoolean } from '../../helpers';
 
 const defaultInputs = {
@@ -29,6 +31,15 @@ const defaultInputs = {
   'availability_setting.timezone': 'Asia/Shanghai',
   'availability_setting.message':
     '当前处于宵禁状态，22:00-8:00期间服务不可用，敬请谅解~',
+  CheckSensitiveEnabled: false,
+  CheckSensitiveOnPromptEnabled: false,
+  SensitiveWords: '',
+  'checkin_setting.enabled': false,
+  'checkin_setting.min_quota': 1000,
+  'checkin_setting.max_quota': 10000,
+  'checkin_bonus_setting.enabled': false,
+  'checkin_bonus_setting.min_amount': 50000,
+  'checkin_bonus_setting.max_amount': 500000,
 };
 
 const CustomSetting = () => {
@@ -75,6 +86,12 @@ const CustomSetting = () => {
     <Spin spinning={loading} size='large'>
       <Card style={{ marginTop: '10px' }}>
         <SettingsAvailability options={inputs} refresh={onRefresh} />
+      </Card>
+      <Card style={{ marginTop: '10px' }}>
+        <SettingsSensitiveWords options={inputs} refresh={onRefresh} />
+      </Card>
+      <Card style={{ marginTop: '10px' }}>
+        <SettingsCheckin options={inputs} refresh={onRefresh} />
       </Card>
     </Spin>
   );

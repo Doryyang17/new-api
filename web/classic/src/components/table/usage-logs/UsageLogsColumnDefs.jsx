@@ -144,10 +144,7 @@ function renderType(type, t) {
 
 function buildStreamStatusTooltip(ss, t) {
   if (!ss) return null;
-  const lines = [
-    t('流状态') + '：' + t('异常'),
-    (ss.end_reason || 'unknown'),
-  ];
+  const lines = [t('流状态') + '：' + t('异常'), ss.end_reason || 'unknown'];
   if (ss.error_count > 0) {
     lines.push(`${t('软错误')}: ${ss.error_count}`);
   }
@@ -185,11 +182,7 @@ function renderIsStream(bool, t, streamStatus) {
                 userSelect: 'none',
               }}
             >
-              <CircleAlert
-                size={14}
-                strokeWidth={2.5}
-                color='currentColor'
-              />
+              <CircleAlert size={14} strokeWidth={2.5} color='currentColor' />
             </span>
           </Tooltip>
         )}
@@ -461,7 +454,11 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     };
   }
 
-  const summaryOpts = { ...other, displayMode: billingDisplayMode, outputMode: 'segments' };
+  const summaryOpts = {
+    ...other,
+    displayMode: billingDisplayMode,
+    outputMode: 'segments',
+  };
 
   if (other?.billing_mode === 'tiered_expr') {
     return { segments: renderTieredModelPriceSimple(summaryOpts) };
@@ -818,6 +815,40 @@ export const getLogsColumns = ({
         }
         const other = getLogOther(record.other);
         const isSubscription = other?.billing_source === 'subscription';
+        const bonusDeducted = other?.checkin_bonus_deducted ?? 0;
+        const originalDeducted = other?.original_funding_deducted ?? 0;
+        if (bonusDeducted > 0) {
+          const originalLabel = isSubscription ? '订阅额度' : '账户余额';
+          const consumeTotal = other?.consume_total ?? record.quota ?? 0;
+          return (
+            <Tooltip
+              content={`签到赠金 ${renderQuota(bonusDeducted, 6)}，${originalLabel} ${renderQuota(originalDeducted, 6)}`}
+            >
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  fontVariantNumeric: 'tabular-nums',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {renderQuota(consumeTotal, 6)}
+                <img
+                  src='/checkin-bonus-icon.svg'
+                  alt='签到赠金抵扣'
+                  title='签到赠金抵扣'
+                  style={{
+                    display: 'block',
+                    flexShrink: 0,
+                    width: 20,
+                    height: 20,
+                    marginLeft: 6,
+                  }}
+                />
+              </span>
+            </Tooltip>
+          );
+        }
         if (isSubscription) {
           // Subscription billed: show only tag (no $0), but keep tooltip for equivalent cost.
           return (

@@ -34,7 +34,7 @@ import {
   CreditCard,
   Server,
   Activity,
-  PanelsTopLeft,
+  Globe,
 } from 'lucide-react';
 
 import SystemSetting from '../../components/settings/SystemSetting';
@@ -69,16 +69,6 @@ const Setting = () => {
       ),
       content: <OperationSetting />,
       itemKey: 'operation',
-    });
-    panes.push({
-      tab: (
-        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <PanelsTopLeft size={18} />
-          {t('定制化功能')}
-        </span>
-      ),
-      content: <CustomSetting />,
-      itemKey: 'custom',
     });
     panes.push({
       tab: (
@@ -189,6 +179,16 @@ const Setting = () => {
       ),
       content: <OtherSetting />,
       itemKey: 'other',
+    });
+    panes.push({
+      tab: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <Globe size={18} />
+          {t('定制化功能')}
+        </span>
+      ),
+      content: <CustomSetting />,
+      itemKey: 'custom',
     });
   }
   const onChangeTab = (key) => {

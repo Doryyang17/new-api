@@ -484,9 +484,6 @@ export type BillingSettings = {
   // section (saved via /api/option/waffo-pancake/save).
   WaffoPancakeStoreID: string
   WaffoPancakeProductID: string
-  'checkin_setting.enabled': boolean
-  'checkin_setting.min_quota': number
-  'checkin_setting.max_quota': number
 }
 
 export type OperationsSettings = {
@@ -533,6 +530,32 @@ export type CustomSettings = {
   'daily_usage_setting.timezone': string
   'daily_usage_setting.message': string
   'daily_usage_setting.model_limits': DailyUsageModelLimitConfig[]
+  CheckSensitiveEnabled: boolean
+  CheckSensitiveOnPromptEnabled: boolean
+  SensitiveWords: string
+  'prompt_filter_setting.mode': 'block' | 'warn' | 'monitor'
+  'prompt_filter_setting.threshold': number
+  'prompt_filter_setting.strict_threshold': number
+  'prompt_filter_setting.log_matches': boolean
+  'prompt_filter_setting.max_text_length': number
+  'prompt_filter_setting.message': string
+  'prompt_filter_setting.block_status_code': number
+  'prompt_filter_setting.block_error_code': string
+  'prompt_filter_setting.group_whitelist': string[]
+  'prompt_filter_setting.channel_whitelist': number[]
+  'prompt_filter_setting.custom_patterns': string
+  'prompt_filter_setting.disabled_patterns': string
+  'prompt_filter_setting.review_enabled': boolean
+  'prompt_filter_setting.review_base_url': string
+  'prompt_filter_setting.review_model': string
+  'prompt_filter_setting.review_timeout_seconds': number
+  'prompt_filter_setting.review_fail_closed': boolean
+  'checkin_setting.enabled': boolean
+  'checkin_setting.min_quota': number
+  'checkin_setting.max_quota': number
+  'checkin_bonus_setting.enabled': boolean
+  'checkin_bonus_setting.min_amount': number
+  'checkin_bonus_setting.max_amount': number
 }
 
 export type RegistrationCode = {
@@ -581,26 +604,6 @@ export type SecuritySettings = {
   'request_risk_setting.user_concurrency_limit': number
   'request_risk_setting.token_concurrency_limit': number
   'request_risk_setting.group_whitelist': string[]
-  CheckSensitiveEnabled: boolean
-  CheckSensitiveOnPromptEnabled: boolean
-  SensitiveWords: string
-  'prompt_filter_setting.mode': 'block' | 'warn' | 'monitor'
-  'prompt_filter_setting.threshold': number
-  'prompt_filter_setting.strict_threshold': number
-  'prompt_filter_setting.log_matches': boolean
-  'prompt_filter_setting.max_text_length': number
-  'prompt_filter_setting.message': string
-  'prompt_filter_setting.block_status_code': number
-  'prompt_filter_setting.block_error_code': string
-  'prompt_filter_setting.group_whitelist': string[]
-  'prompt_filter_setting.channel_whitelist': number[]
-  'prompt_filter_setting.custom_patterns': string
-  'prompt_filter_setting.disabled_patterns': string
-  'prompt_filter_setting.review_enabled': boolean
-  'prompt_filter_setting.review_base_url': string
-  'prompt_filter_setting.review_model': string
-  'prompt_filter_setting.review_timeout_seconds': number
-  'prompt_filter_setting.review_fail_closed': boolean
   'fetch_setting.enable_ssrf_protection': boolean
   'fetch_setting.allow_private_ip': boolean
   'fetch_setting.domain_filter_mode': boolean
