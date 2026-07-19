@@ -144,6 +144,33 @@ func formatUserLogs(logs []*Log, startIdx int) {
 	assignDisplayLogIds(logs, startIdx)
 }
 
+func stripRequestRiskAdminLogDetails(logs []*Log) {
+	for _, log := range logs {
+		other, _ := common.StrToMap(log.Other)
+		if other == nil {
+			continue
+		}
+		adminInfo, ok := other["admin_info"].(map[string]interface{})
+		if !ok || adminInfo == nil {
+			continue
+		}
+		changed := false
+		for _, key := range []string{
+			"request_risk_extracted_text",
+			"request_risk_full_text",
+			"request_risk_full_request",
+		} {
+			if _, exists := adminInfo[key]; exists {
+				delete(adminInfo, key)
+				changed = true
+			}
+		}
+		if changed {
+			log.Other = common.MapToJsonStr(other)
+		}
+	}
+}
+
 func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
 	order := "id desc"
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
@@ -294,6 +321,14 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
 	isStream bool, group string, other map[string]interface{}) {
+	log := buildErrorLog(c, userId, channelId, modelName, tokenName, content, tokenId, useTimeSeconds, isStream, group, other)
+	if err := createLog(log); err != nil {
+		logger.LogError(c, "failed to record log: "+err.Error())
+	}
+}
+
+func buildErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
+	isStream bool, group string, other map[string]interface{}) *Log {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
 	username := c.GetString("username")
 	if username == "" && userId != 0 {
@@ -311,7 +346,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 			needRecordIp = true
 		}
 	}
-	log := &Log{
+	return &Log{
 		UserId:           userId,
 		Username:         username,
 		CreatedAt:        common.GetTimestamp(),
@@ -336,10 +371,6 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		RequestId:         requestId,
 		UpstreamRequestId: upstreamRequestId,
 		Other:             otherStr,
-	}
-	err := createLog(log)
-	if err != nil {
-		logger.LogError(c, "failed to record log: "+err.Error())
 	}
 }
 
@@ -404,6 +435,14 @@ func RecordPromptFilterRejectLog(c *gin.Context, content string, other map[strin
 }
 
 func RecordRequestGuardLog(c *gin.Context, content string, reason string, other map[string]interface{}, blocked bool) {
+	recordRequestGuardLog(c, content, reason, other, blocked, nil)
+}
+
+func RecordRequestGuardLogWithDetail(c *gin.Context, content string, reason string, other map[string]interface{}, blocked bool, detail *RequestRiskLogDetail) {
+	recordRequestGuardLog(c, content, reason, other, blocked, detail)
+}
+
+func recordRequestGuardLog(c *gin.Context, content string, reason string, other map[string]interface{}, blocked bool, detail *RequestRiskLogDetail) {
 	if other == nil {
 		other = map[string]interface{}{}
 	}
@@ -428,7 +467,7 @@ func RecordRequestGuardLog(c *gin.Context, content string, reason string, other 
 		tokenId = 0
 		tokenName = ""
 	}
-	RecordErrorLog(
+	log := buildErrorLog(
 		c,
 		userId,
 		common.GetContextKeyInt(c, constant.ContextKeyChannelId),
@@ -441,6 +480,38 @@ func RecordRequestGuardLog(c *gin.Context, content string, reason string, other 
 		common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
 		other,
 	)
+	if detail == nil {
+		if err := createLog(log); err != nil {
+			logger.LogError(c, "failed to record request guard log: "+err.Error())
+		}
+		return
+	}
+
+	ensureLogRequestId(log)
+	detail.RequestId = log.RequestId
+	detail.CreatedAt = log.CreatedAt
+	detail.Kind = requestRiskLogKindFromReason(reason)
+	if detail.Kind == "" {
+		logger.LogError(c, "failed to record request guard detail: unknown risk reason")
+		return
+	}
+
+	var err error
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		if err = LOG_DB.Create(detail).Error; err == nil {
+			err = LOG_DB.Create(log).Error
+		}
+	} else {
+		err = LOG_DB.Transaction(func(tx *gorm.DB) error {
+			if createErr := tx.Create(log).Error; createErr != nil {
+				return createErr
+			}
+			return tx.Create(detail).Error
+		})
+	}
+	if err != nil {
+		logger.LogError(c, "failed to record request guard log detail: "+err.Error())
+	}
 }
 
 type RecordConsumeLogParams struct {
@@ -642,6 +713,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		assignDisplayLogIds(logs, startIdx)
 	}
+	stripRequestRiskAdminLogDetails(logs)
 
 	if err = hydrateMissingLogUsernames(logs); err != nil {
 		return logs, total, err
@@ -952,6 +1024,9 @@ func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64,
 	if limit <= 0 {
 		limit = 100
 	}
+	if err := DeleteOldRequestRiskLogDetails(ctx, targetTimestamp, limit); err != nil {
+		return 0, err
+	}
 
 	var total int64 = 0
 
@@ -973,4 +1048,45 @@ func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64,
 	}
 
 	return total, nil
+}
+
+// DeleteOldRequestRiskLogDetails removes request-risk payload rows older than
+// the log-retention cutoff. Both synchronous and system-task cleanup paths call
+// this once before deleting their matching log metadata.
+func DeleteOldRequestRiskLogDetails(ctx context.Context, targetTimestamp int64, limit int) error {
+	if limit <= 0 {
+		limit = 100
+	}
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		var total int64
+		if err := LOG_DB.WithContext(ctx).
+			Model(&RequestRiskLogDetail{}).
+			Where("created_at < ?", targetTimestamp).
+			Count(&total).Error; err != nil {
+			return err
+		}
+		if total == 0 {
+			return nil
+		}
+		return LOG_DB.WithContext(ctx).Exec(
+			"ALTER TABLE request_risk_log_details DELETE WHERE created_at < ? SETTINGS mutations_sync = 1",
+			targetTimestamp,
+		).Error
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		result := LOG_DB.WithContext(ctx).
+			Where("created_at < ?", targetTimestamp).
+			Limit(limit).
+			Delete(&RequestRiskLogDetail{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected < int64(limit) {
+			return nil
+		}
+	}
 }

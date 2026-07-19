@@ -53,11 +53,14 @@ var requestRiskMeaninglessTexts = map[string]struct{}{
 }
 
 type RequestRiskInput struct {
-	UserID   int
-	TokenID  int
-	ClientIP string
-	Model    string
-	Text     string
+	UserID                       int
+	TokenID                      int
+	ClientIP                     string
+	Model                        string
+	Text                         string
+	ExtractedText                string
+	FullRequest                  string
+	FullRequestUnavailableReason string
 }
 
 type RequestRiskMetrics struct {
@@ -70,16 +73,17 @@ type RequestRiskMetrics struct {
 }
 
 type RequestRiskVerdict struct {
-	Level         string
-	Score         int
-	Factors       []string
-	Metrics       RequestRiskMetrics
-	RetryAfter    time.Duration
-	Blocked       bool
-	Observed      bool
-	ExistingBlock bool
-	Fingerprint   string
-	ScopeKey      string
+	Level           string
+	Score           int
+	Factors         []string
+	MatchedKeywords []string
+	Metrics         RequestRiskMetrics
+	RetryAfter      time.Duration
+	Blocked         bool
+	Observed        bool
+	ExistingBlock   bool
+	Fingerprint     string
+	ScopeKey        string
 }
 
 type requestRiskSnapshot struct {
@@ -383,6 +387,7 @@ func scoreRequestRisk(snapshot requestRiskSnapshot, normalizedText string) Reque
 	if _, found := requestRiskMeaninglessTexts[normalizedText]; found {
 		verdict.Score++
 		verdict.Factors = append(verdict.Factors, "meaningless_exact_match")
+		verdict.MatchedKeywords = append(verdict.MatchedKeywords, normalizedText)
 	}
 
 	if snapshot.RepeatCount60s >= 6 {

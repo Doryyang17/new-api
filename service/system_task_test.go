@@ -232,3 +232,48 @@ func TestEnqueueSystemTaskReportsCreatedAndExistingActive(t *testing.T) {
 	require.NotNil(t, second)
 	assert.NotEqual(t, first.TaskID, second.TaskID)
 }
+
+func TestRunLogCleanupTaskDeletesOrphanedRequestRiskDetails(t *testing.T) {
+	truncate(t)
+	require.NoError(t, model.LOG_DB.AutoMigrate(&model.RequestRiskLogDetail{}))
+	t.Cleanup(func() {
+		model.LOG_DB.Exec("DELETE FROM request_risk_log_details")
+	})
+
+	require.NoError(t, model.LOG_DB.Create(&model.RequestRiskLogDetail{
+		RequestId: "old-orphaned-risk-detail",
+		CreatedAt: 1,
+		Kind:      model.RequestRiskLogKindProbe,
+	}).Error)
+	require.NoError(t, model.LOG_DB.Create(&model.RequestRiskLogDetail{
+		RequestId: "new-risk-detail",
+		CreatedAt: 20,
+		Kind:      model.RequestRiskLogKindProbe,
+	}).Error)
+
+	task, err := model.CreateSystemTask(model.SystemTaskTypeLogCleanup, LogCleanupPayload{
+		TargetTimestamp: 10,
+		BatchSize:       100,
+	}, LogCleanupState{})
+	require.NoError(t, err)
+	claimedTask, claimed, err := model.ClaimSystemTask(
+		task.ID,
+		model.SystemTaskTypeLogCleanup,
+		"runner-cleanup-details",
+		common.GetTimestamp()+60,
+	)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	runLogCleanupTask(context.Background(), claimedTask, "runner-cleanup-details")
+
+	finished, err := model.GetSystemTaskByTaskID(task.TaskID)
+	require.NoError(t, err)
+	require.NotNil(t, finished)
+	assert.Equal(t, model.SystemTaskStatusSucceeded, finished.Status)
+
+	var details []model.RequestRiskLogDetail
+	require.NoError(t, model.LOG_DB.Order("created_at asc").Find(&details).Error)
+	require.Len(t, details, 1)
+	assert.Equal(t, "new-risk-detail", details[0].RequestId)
+}

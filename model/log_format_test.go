@@ -57,6 +57,49 @@ func TestFormatUserLogsStripsPromptFilterFullText(t *testing.T) {
 	require.NotContains(t, logs[0].Other, "secret")
 }
 
+func TestFormatUserLogsStripsRequestRiskFullRequest(t *testing.T) {
+	other := common.MapToJsonStr(map[string]interface{}{
+		"risk_reason": "request_probe_guard",
+		"admin_info": map[string]interface{}{
+			"request_risk_extracted_text": "评分文本",
+			"request_risk_full_request":   `{"model":"gpt-test","messages":[{"role":"user","content":"敏感请求"}]}`,
+		},
+	})
+	logs := []*Log{{Other: other}}
+
+	formatUserLogs(logs, 0)
+
+	parsed, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	require.NotContains(t, parsed, "admin_info")
+	require.NotContains(t, logs[0].Other, "敏感请求")
+}
+
+func TestStripRequestRiskAdminLogDetailsKeepsDiagnostics(t *testing.T) {
+	other := common.MapToJsonStr(map[string]interface{}{
+		"risk_reason": "request_probe_guard",
+		"admin_info": map[string]interface{}{
+			"risk_score":                  3,
+			"text_preview":                "请求预览",
+			"request_risk_extracted_text": "完整评分文本",
+			"request_risk_full_request":   `{"model":"gpt-test","messages":[{"role":"user","content":"敏感请求"}]}`,
+		},
+	})
+	logs := []*Log{{Other: other}}
+
+	stripRequestRiskAdminLogDetails(logs)
+
+	parsed, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	adminInfo, ok := parsed["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	require.EqualValues(t, 3, adminInfo["risk_score"])
+	require.Equal(t, "请求预览", adminInfo["text_preview"])
+	require.NotContains(t, adminInfo, "request_risk_extracted_text")
+	require.NotContains(t, adminInfo, "request_risk_full_request")
+	require.NotContains(t, logs[0].Other, "敏感请求")
+}
+
 func TestPromptFilterLogFromRawReadsAdminInfoFullText(t *testing.T) {
 	other := common.MapToJsonStr(map[string]interface{}{
 		"reject_reason": "prompt_filter",

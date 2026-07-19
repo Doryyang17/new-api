@@ -348,9 +348,12 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 	if payload.BatchSize <= 0 {
 		payload.BatchSize = logCleanupBatchSize
 	}
-
 	state := LogCleanupState{}
 	if err := task.DecodeState(&state); err != nil {
+		failSystemTask(task, runnerID, err)
+		return
+	}
+	if err := model.DeleteOldRequestRiskLogDetails(ctx, payload.TargetTimestamp, payload.BatchSize); err != nil {
 		failSystemTask(task, runnerID, err)
 		return
 	}

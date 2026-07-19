@@ -316,6 +316,10 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   'user.delete': 'Deleted user {{username}} (ID: {{id}})',
   'user.manage': 'Performed {{action}} on user {{username}} (ID: {{id}})',
   'user.quota_add': 'Increased user quota by {{quota}}',
+  'user.quota_grant':
+    'Received an administrator quota grant of ${{amount_usd}}: {{reason}}',
+  'user.quota_grant_batch':
+    'Granted ${{amount_usd}} to {{count}} users: {{reason}}',
   'user.quota_subtract': 'Decreased user quota by {{quota}}',
   'user.quota_override': 'Overrode user quota from {{from}} to {{to}}',
   'user.binding_clear': 'Cleared {{bindingType}} binding for user {{username}}',

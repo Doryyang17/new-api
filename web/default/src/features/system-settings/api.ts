@@ -33,6 +33,8 @@ import type {
   PromptFilterStatusData,
   PromptFilterVerdict,
   RegistrationCodeListResponse,
+  RequestRiskLog,
+  RequestRiskLogsData,
   SystemOptionsResponse,
   SystemTaskListResponse,
   SystemTaskResponse,
@@ -254,6 +256,42 @@ export async function clearPromptFilterLogs() {
   const res = await api.delete<
     PromptFilterApiResponse<{ deleted_count: number }>
   >('/api/prompt-filter/logs')
+  return res.data
+}
+
+export async function getRequestRiskLogs(params: {
+  page: number
+  page_size: number
+  kind?: string
+  action?: string
+  level?: string
+  model?: string
+  api_key_id?: string
+  q?: string
+}) {
+  const res = await api.get<PromptFilterApiResponse<RequestRiskLogsData>>(
+    '/api/request-risk/logs',
+    { params }
+  )
+  return res.data
+}
+
+export async function getRequestRiskLogDetail(params: {
+  request_id: string
+  kind: string
+  created_at: number
+}) {
+  const res = await api.get<PromptFilterApiResponse<RequestRiskLog>>(
+    '/api/request-risk/logs/detail',
+    { params }
+  )
+  return res.data
+}
+
+export async function clearRequestRiskLogs() {
+  const res = await api.delete<
+    PromptFilterApiResponse<{ deleted_count: number }>
+  >('/api/request-risk/logs')
   return res.data
 }
 

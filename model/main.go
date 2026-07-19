@@ -272,12 +272,14 @@ func migrateDB() error {
 		&Channel{},
 		&Token{},
 		&User{},
+		&QuotaGrantBatch{},
 		&PasskeyCredential{},
 		&Option{},
 		&Redemption{},
 		&RegistrationCode{},
 		&Ability{},
 		&Log{},
+		&RequestRiskLogDetail{},
 		&Midjourney{},
 		&TopUp{},
 		&QuotaData{},
@@ -331,12 +333,14 @@ func migrateDBFast() error {
 		{&Channel{}, "Channel"},
 		{&Token{}, "Token"},
 		{&User{}, "User"},
+		{&QuotaGrantBatch{}, "QuotaGrantBatch"},
 		{&PasskeyCredential{}, "PasskeyCredential"},
 		{&Option{}, "Option"},
 		{&Redemption{}, "Redemption"},
 		{&RegistrationCode{}, "RegistrationCode"},
 		{&Ability{}, "Ability"},
 		{&Log{}, "Log"},
+		{&RequestRiskLogDetail{}, "RequestRiskLogDetail"},
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
 		{&QuotaData{}, "QuotaData"},
@@ -402,7 +406,7 @@ func migrateLOGDB() error {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		return migrateClickHouseLogDB()
 	}
-	return LOG_DB.AutoMigrate(&Log{})
+	return LOG_DB.AutoMigrate(&Log{}, &RequestRiskLogDetail{})
 }
 
 func migrateClickHouseLogDB() error {
@@ -410,7 +414,13 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec(clickHouseLogCreateTableSQL(ttlDays)).Error; err != nil {
 		return err
 	}
-	return syncClickHouseLogTTL(ttlDays)
+	if err := LOG_DB.Exec(clickHouseRequestRiskLogDetailCreateTableSQL(ttlDays)).Error; err != nil {
+		return err
+	}
+	if err := syncClickHouseTableTTL("logs", ttlDays); err != nil {
+		return err
+	}
+	return syncClickHouseTableTTL("request_risk_log_details", ttlDays)
 }
 
 func clickHouseLogTTLDays() int {
@@ -465,25 +475,40 @@ PARTITION BY toYYYYMM(toDateTime(created_at))
 ORDER BY (created_at, request_id)%s`, clickHouseLogTTLClause(ttlDays))
 }
 
-func syncClickHouseLogTTL(ttlDays int) error {
+func clickHouseRequestRiskLogDetailCreateTableSQL(ttlDays int) string {
+	return fmt.Sprintf(`
+CREATE TABLE IF NOT EXISTS request_risk_log_details (
+	id Int64 DEFAULT 0,
+	request_id String DEFAULT '',
+	created_at Int64 DEFAULT 0,
+	kind String DEFAULT '',
+	extracted_text String DEFAULT '',
+	full_request String DEFAULT ''
+)
+ENGINE = MergeTree()
+PARTITION BY toYYYYMM(toDateTime(created_at))
+ORDER BY (created_at, request_id, kind)%s`, clickHouseLogTTLClause(ttlDays))
+}
+
+func syncClickHouseTableTTL(tableName string, ttlDays int) error {
 	expression := clickHouseLogTTLExpression(ttlDays)
 	if expression != "" {
-		return LOG_DB.Exec("ALTER TABLE logs MODIFY TTL " + expression).Error
+		return LOG_DB.Exec("ALTER TABLE " + tableName + " MODIFY TTL " + expression).Error
 	}
 
-	hasTTL, err := clickHouseLogTableHasTTL()
+	hasTTL, err := clickHouseTableHasTTL(tableName)
 	if err != nil {
 		return err
 	}
 	if !hasTTL {
 		return nil
 	}
-	return LOG_DB.Exec("ALTER TABLE logs REMOVE TTL").Error
+	return LOG_DB.Exec("ALTER TABLE " + tableName + " REMOVE TTL").Error
 }
 
-func clickHouseLogTableHasTTL() (bool, error) {
+func clickHouseTableHasTTL(tableName string) (bool, error) {
 	var createTableSQL string
-	if err := LOG_DB.Raw("SHOW CREATE TABLE logs").Scan(&createTableSQL).Error; err != nil {
+	if err := LOG_DB.Raw("SHOW CREATE TABLE " + tableName).Scan(&createTableSQL).Error; err != nil {
 		return false, err
 	}
 	return clickHouseCreateTableHasTTL(createTableSQL), nil

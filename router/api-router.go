@@ -125,6 +125,14 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.DELETE("/oauth/bindings/:provider_id", controller.UnbindCustomOAuth)
 			}
 
+			quotaGrantRoute := userRoute.Group("/quota-grants")
+			quotaGrantRoute.Use(middleware.RootAuth())
+			{
+				quotaGrantRoute.GET("/targets", controller.ListQuotaGrantTargets)
+				quotaGrantRoute.GET("/targets/ids", controller.ListQuotaGrantTargetIds)
+				quotaGrantRoute.POST("", controller.GrantUserQuotaBatch)
+			}
+
 			adminRoute := userRoute.Group("/")
 			adminRoute.Use(middleware.AdminAuth())
 			{
@@ -218,6 +226,14 @@ func SetApiRouter(router *gin.Engine) {
 			promptFilterRoute.GET("/logs", controller.ListPromptFilterLogs)
 			promptFilterRoute.DELETE("/logs", controller.ClearPromptFilterLogs)
 			promptFilterRoute.POST("/test", controller.TestPromptFilter)
+		}
+
+		requestRiskRoute := apiRouter.Group("/request-risk")
+		requestRiskRoute.Use(middleware.RootAuth(), middleware.DisableCache())
+		{
+			requestRiskRoute.GET("/logs", controller.ListRequestRiskLogs)
+			requestRiskRoute.GET("/logs/detail", controller.GetRequestRiskLogDetail)
+			requestRiskRoute.DELETE("/logs", controller.ClearRequestRiskLogs)
 		}
 
 		// Custom OAuth provider management (root only)

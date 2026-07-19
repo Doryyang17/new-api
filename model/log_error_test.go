@@ -125,3 +125,45 @@ func TestRecordRequestGuardLogKeepsObservationAdminOnly(t *testing.T) {
 	require.Len(t, tokenLogs, 1)
 	assert.Equal(t, "已限制请求", tokenLogs[0].Content)
 }
+
+func TestRecordRequestGuardLogStoresLargeDetailsSeparately(t *testing.T) {
+	truncateTables(t)
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Set(common.RequestIdKey, "request-risk-separated")
+	c.Set("id", 88)
+	c.Set("username", "risk-user")
+	other := map[string]interface{}{
+		"admin_info": map[string]interface{}{
+			"text_preview":           "请求预览",
+			"full_request_available": true,
+		},
+	}
+
+	RecordRequestGuardLogWithDetail(
+		c,
+		"观察命中",
+		"request_probe_guard",
+		other,
+		false,
+		&RequestRiskLogDetail{
+			ExtractedText: "完整评分文本",
+			FullRequest:   `{"model":"gpt-test","messages":[{"role":"user","content":"完整请求内容"}]}`,
+		},
+	)
+
+	var log Log
+	require.NoError(t, LOG_DB.Where("request_id = ?", "request-risk-separated").First(&log).Error)
+	assert.NotContains(t, log.Other, "request_risk_extracted_text")
+	assert.NotContains(t, log.Other, "request_risk_full_request")
+	assert.NotContains(t, log.Other, "完整请求内容")
+
+	var detail RequestRiskLogDetail
+	require.NoError(t, LOG_DB.Where("request_id = ?", "request-risk-separated").First(&detail).Error)
+	assert.Equal(t, RequestRiskLogKindProbe, detail.Kind)
+	assert.Equal(t, "完整评分文本", detail.ExtractedText)
+	assert.Contains(t, detail.FullRequest, "完整请求内容")
+}

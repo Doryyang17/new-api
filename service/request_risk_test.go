@@ -48,6 +48,15 @@ func TestRequestRiskSingleShortPromptDoesNotBlock(t *testing.T) {
 	assert.False(t, verdict.Blocked)
 }
 
+func TestRequestRiskReportsNormalizedMatchedKeyword(t *testing.T) {
+	withRequestRiskMemoryStore(t)
+	verdict := EvaluateRequestRisk(context.Background(), RequestRiskInput{
+		UserID: 1, TokenID: 2, Model: "gpt-5", Text: "  你好！！！  ",
+	}, requestRiskTestSettings(system_setting.RequestRiskModeObserve))
+
+	assert.Equal(t, []string{"你好"}, verdict.MatchedKeywords)
+}
+
 func TestRequestRiskNormalShortQuestionHasNoContentRisk(t *testing.T) {
 	withRequestRiskMemoryStore(t)
 	verdict := EvaluateRequestRisk(context.Background(), RequestRiskInput{

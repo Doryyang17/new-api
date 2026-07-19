@@ -20,12 +20,19 @@ For commercial licensing, please contact support@quantumnous.com
 import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { AvailabilitySection } from '../maintenance/availability-section'
 import { DailyUsageLimitSection } from '../maintenance/daily-usage-limit-section'
+import { RequestRiskSection } from '../request-limits/request-risk-section'
 import { SensitiveWordsSection } from '../request-limits/sensitive-words-section'
 import type { CustomSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { QuotaGrantSection } from './quota-grant-section'
 import { RegistrationCodesSection } from './registration-codes-section'
 
 const CUSTOM_SECTIONS = [
+  {
+    id: 'quota-grants',
+    titleKey: 'Quota Grants',
+    build: () => <QuotaGrantSection />,
+  },
   {
     id: 'registration-codes',
     titleKey: 'Registration Codes',
@@ -122,6 +129,35 @@ const CUSTOM_SECTIONS = [
             settings['prompt_filter_setting.review_timeout_seconds'],
           'prompt_filter_setting.review_fail_closed':
             settings['prompt_filter_setting.review_fail_closed'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'request-risk',
+    titleKey: '批量测活与并发防护',
+    build: (settings: CustomSettings) => (
+      <RequestRiskSection
+        defaultValues={{
+          'request_risk_setting.enabled':
+            settings['request_risk_setting.enabled'],
+          'request_risk_setting.mode': settings['request_risk_setting.mode'],
+          'request_risk_setting.log_matches':
+            settings['request_risk_setting.log_matches'],
+          'request_risk_setting.medium_cooldown_seconds':
+            settings['request_risk_setting.medium_cooldown_seconds'],
+          'request_risk_setting.token_block_seconds':
+            settings['request_risk_setting.token_block_seconds'],
+          'request_risk_setting.user_block_seconds':
+            settings['request_risk_setting.user_block_seconds'],
+          'request_risk_setting.ip_block_seconds':
+            settings['request_risk_setting.ip_block_seconds'],
+          'request_risk_setting.user_concurrency_limit':
+            settings['request_risk_setting.user_concurrency_limit'],
+          'request_risk_setting.token_concurrency_limit':
+            settings['request_risk_setting.token_concurrency_limit'],
+          'request_risk_setting.group_whitelist':
+            settings['request_risk_setting.group_whitelist'],
         }}
       />
     ),

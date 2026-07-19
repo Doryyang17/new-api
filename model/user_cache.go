@@ -13,6 +13,11 @@ import (
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
+const (
+	userCacheInvalidationRetryAttempts = 5
+	userCacheInvalidationRetryDelay    = 2 * time.Second
+)
+
 // UserBase struct remains the same as it represents the cached data structure
 type UserBase struct {
 	Id       int    `json:"id"`
@@ -55,6 +60,40 @@ func invalidateUserCache(userId int) error {
 		return nil
 	}
 	return common.RedisDelKey(getUserCacheKey(userId))
+}
+
+func invalidateUserCaches(userIds []int) error {
+	if !common.RedisEnabled || len(userIds) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(userIds))
+	for _, userId := range userIds {
+		keys = append(keys, getUserCacheKey(userId))
+	}
+	return common.RedisDelKeys(keys...)
+}
+
+func scheduleUserCacheInvalidationRetry(userIds []int) {
+	if !common.RedisEnabled || len(userIds) == 0 {
+		return
+	}
+	ids := append([]int(nil), userIds...)
+	scheduleUserCacheInvalidationRetryAttempt(ids, userCacheInvalidationRetryAttempts)
+}
+
+func scheduleUserCacheInvalidationRetryAttempt(userIds []int, attemptsRemaining int) {
+	if attemptsRemaining <= 0 {
+		return
+	}
+	time.AfterFunc(userCacheInvalidationRetryDelay, func() {
+		if err := invalidateUserCaches(userIds); err != nil {
+			if attemptsRemaining == 1 {
+				common.SysError(fmt.Sprintf("failed to invalidate %d user caches after quota grant retries: %s", len(userIds), err.Error()))
+				return
+			}
+			scheduleUserCacheInvalidationRetryAttempt(userIds, attemptsRemaining-1)
+		}
+	})
 }
 
 // InvalidateUserCache is the exported version of invalidateUserCache.

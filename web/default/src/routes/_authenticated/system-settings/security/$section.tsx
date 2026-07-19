@@ -34,6 +34,12 @@ export const Route = createFileRoute(
         params: { section: 'prompt-filter' },
       })
     }
+    if (params.section === 'request-risk') {
+      throw redirect({
+        to: '/system-settings/custom/$section',
+        params: { section: 'request-risk' },
+      })
+    }
 
     const validSections = SECURITY_SECTION_IDS as unknown as string[]
     if (!validSections.includes(params.section)) {

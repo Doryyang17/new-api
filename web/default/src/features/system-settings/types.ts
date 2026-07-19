@@ -192,6 +192,50 @@ export type PromptFilterLogsData = {
   page_size: number
 }
 
+export type RequestRiskLog = {
+  id: number
+  created_at: number
+  kind: 'probe' | 'concurrency'
+  blocked: boolean
+  mode: string
+  risk_level: string
+  score: number
+  factors: string[]
+  matched_keywords: string[]
+  text_preview: string
+  extracted_text?: string
+  full_request?: string
+  full_request_available: boolean
+  full_request_unavailable_reason?: string
+  extracted_chars: number
+  endpoint: string
+  model: string
+  user_id: number
+  username: string
+  api_key_id: number
+  api_key_name: string
+  group: string
+  client_ip: string
+  request_id: string
+  request_count_10s: number
+  request_count_60s: number
+  ip_request_count_60s: number
+  repeat_count_60s: number
+  distinct_models_60s: number
+  failure_count_30s: number
+  user_in_flight: number
+  user_limit: number
+  token_in_flight: number
+  token_limit: number
+}
+
+export type RequestRiskLogsData = {
+  items: RequestRiskLog[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export type PromptFilterApiResponse<T> = {
   success: boolean
   message: string
@@ -556,6 +600,16 @@ export type CustomSettings = {
   'checkin_bonus_setting.enabled': boolean
   'checkin_bonus_setting.min_amount': number
   'checkin_bonus_setting.max_amount': number
+  'request_risk_setting.enabled': boolean
+  'request_risk_setting.mode': 'observe' | 'enforce'
+  'request_risk_setting.log_matches': boolean
+  'request_risk_setting.medium_cooldown_seconds': number
+  'request_risk_setting.token_block_seconds': number
+  'request_risk_setting.user_block_seconds': number
+  'request_risk_setting.ip_block_seconds': number
+  'request_risk_setting.user_concurrency_limit': number
+  'request_risk_setting.token_concurrency_limit': number
+  'request_risk_setting.group_whitelist': string[]
 }
 
 export type RegistrationCode = {
@@ -594,16 +648,6 @@ export type SecuritySettings = {
   ModelRequestRateLimitSuccessCount: number
   ModelRequestRateLimitDurationMinutes: number
   ModelRequestRateLimitGroup: string
-  'request_risk_setting.enabled': boolean
-  'request_risk_setting.mode': 'observe' | 'enforce'
-  'request_risk_setting.log_matches': boolean
-  'request_risk_setting.medium_cooldown_seconds': number
-  'request_risk_setting.token_block_seconds': number
-  'request_risk_setting.user_block_seconds': number
-  'request_risk_setting.ip_block_seconds': number
-  'request_risk_setting.user_concurrency_limit': number
-  'request_risk_setting.token_concurrency_limit': number
-  'request_risk_setting.group_whitelist': string[]
   'fetch_setting.enable_ssrf_protection': boolean
   'fetch_setting.allow_private_ip': boolean
   'fetch_setting.domain_filter_mode': boolean

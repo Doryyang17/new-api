@@ -54,13 +54,16 @@ func RequestConcurrencyGuard() gin.HandlerFunc {
 
 func recordRequestConcurrencyEvent(c *gin.Context, verdict service.RequestConcurrencyVerdict, mode string) {
 	adminInfo := map[string]interface{}{
-		"risk_factors":      verdict.Factors,
-		"request_risk_mode": mode,
-		"would_block":       verdict.Exceeded,
-		"user_in_flight":    verdict.UserCount,
-		"user_limit":        verdict.UserLimit,
-		"token_in_flight":   verdict.TokenCount,
-		"token_limit":       verdict.TokenLimit,
+		"endpoint":                        c.Request.URL.Path,
+		"risk_factors":                    verdict.Factors,
+		"request_risk_mode":               mode,
+		"would_block":                     verdict.Exceeded,
+		"user_in_flight":                  verdict.UserCount,
+		"user_limit":                      verdict.UserLimit,
+		"token_in_flight":                 verdict.TokenCount,
+		"token_limit":                     verdict.TokenLimit,
+		"full_request_available":          false,
+		"full_request_unavailable_reason": "并发保护在读取请求体前命中",
 	}
 	other := map[string]interface{}{"admin_info": adminInfo}
 	content := "请求并发保护观察命中"

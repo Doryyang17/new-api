@@ -461,7 +461,7 @@ interface DetailsDialogProps {
 export function DetailsDialog(props: DetailsDialogProps) {
   const { t } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
-  const details = props.log.content ?? ''
+  const rawDetails = props.log.content ?? ''
   const other = parseLogOther(props.log.other)
   const typeConfig = getLogTypeConfig(props.log.type)
 
@@ -541,6 +541,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
   // Localized operation text rendered from the language-independent op
   // descriptor (shared by audit type=3 and login type=7).
   const operationText = renderAuditContent(other, t)
+  // Management/login logs keep English in Log.Content as an export/classic
+  // fallback. The default frontend must prefer the localized structured
+  // operation text here as it already does in the table preview.
+  const details = operationText ?? rawDetails
   const auditRoute = isManage && props.isAdmin ? other?.audit_info : undefined
   // Channel update records which fields changed (stable field tokens); render
   // them with their localized labels for admins.

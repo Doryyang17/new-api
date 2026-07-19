@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	appI18n "github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -100,6 +101,178 @@ func TestRequestRiskGuardKeepsSingleShortPromptBodyReusable(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.Equal(t, 1, handled)
+}
+
+func TestRequestRiskFullRequestCapturesJSONBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	payload := `{"model":"gpt-test","seed":9007199254740993,"api_key":"secret-key","messages":[{"role":"user","content":"你好"}]}`
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(payload))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.GetBodyStorage(c)
+	require.NoError(t, err)
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+
+	fullRequest, reason := requestRiskFullRequest(storage, c.Request.Header.Get("Content-Type"))
+
+	assert.JSONEq(t, `{"model":"gpt-test","seed":9007199254740993,"api_key":"[REDACTED]","messages":[{"role":"user","content":"你好"}]}`, fullRequest)
+	assert.Contains(t, fullRequest, "9007199254740993")
+	assert.NotContains(t, fullRequest, "secret-key")
+	assert.Empty(t, reason)
+}
+
+func TestRequestRiskFullRequestSanitizesJSONWithoutContentType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	payload := `{"model":"gpt-test","token":"secret-token","messages":[{"role":"user","content":"你好"}]}`
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(payload))
+	storage, err := common.GetBodyStorage(c)
+	require.NoError(t, err)
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+
+	fullRequest, reason := requestRiskFullRequest(storage, "")
+
+	assert.JSONEq(t, `{"model":"gpt-test","token":"[REDACTED]","messages":[{"role":"user","content":"你好"}]}`, fullRequest)
+	assert.NotContains(t, fullRequest, "secret-token")
+	assert.Empty(t, reason)
+}
+
+func TestRequestRiskFullRequestRejectsMalformedJSONWithoutRawFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	payload := `{"model":"gpt-test","api_key":"secret-key"`
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(payload))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.GetBodyStorage(c)
+	require.NoError(t, err)
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+
+	fullRequest, reason := requestRiskFullRequest(storage, c.Request.Header.Get("Content-Type"))
+
+	assert.Empty(t, fullRequest)
+	assert.Contains(t, reason, "格式不正确")
+	assert.NotContains(t, reason, "secret-key")
+}
+
+func TestRequestRiskFullRequestRejectsJSONShapedBodyWithoutContentType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	payload := `{"model":"gpt-test","api_secret":"secret-value"`
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(payload))
+	storage, err := common.GetBodyStorage(c)
+	require.NoError(t, err)
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+
+	fullRequest, reason := requestRiskFullRequest(storage, "text/plain")
+
+	assert.Empty(t, fullRequest)
+	assert.Contains(t, reason, "疑似 JSON")
+	assert.NotContains(t, reason, "secret-value")
+}
+
+func TestRequestRiskFullRequestDoesNotRecordFormEncodedSecrets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	payload := `api_key=secret-key&prompt=hello`
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(payload))
+	c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	storage, err := common.GetBodyStorage(c)
+	require.NoError(t, err)
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+
+	fullRequest, reason := requestRiskFullRequest(storage, c.Request.Header.Get("Content-Type"))
+
+	assert.Empty(t, fullRequest)
+	assert.Contains(t, reason, "非 JSON")
+	assert.NotContains(t, reason, "secret-key")
+}
+
+func TestPopulateRequestRiskProfileDefersLogOnlyDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	payload := `{"model":"gpt-test","messages":[{"role":"user","content":"你好"}]}`
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(payload))
+	c.Request.Header.Set("Content-Type", "application/json")
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+	input := service.RequestRiskInput{}
+
+	populateRequestRiskProfile(c, &input)
+
+	assert.Equal(t, "你好", input.Text)
+	assert.Empty(t, input.ExtractedText)
+	assert.Empty(t, input.FullRequest)
+
+	populateRequestRiskLogDetails(c, &input)
+
+	assert.Equal(t, "你好", input.ExtractedText)
+	assert.JSONEq(t, payload, input.FullRequest)
+}
+
+func TestRequestRiskFullRequestRejectsExcessiveJSONDepth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	payload := strings.Repeat(`{"nested":`, requestRiskMaxSanitizeDepth+1) + `{"api_key":"secret-value"}` + strings.Repeat("}", requestRiskMaxSanitizeDepth+1)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(payload))
+	c.Request.Header.Set("Content-Type", "application/json")
+	storage, err := common.GetBodyStorage(c)
+	require.NoError(t, err)
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+
+	fullRequest, reason := requestRiskFullRequest(storage, c.Request.Header.Get("Content-Type"))
+
+	assert.Empty(t, fullRequest)
+	assert.Contains(t, reason, "嵌套过深")
+	assert.NotContains(t, reason, "secret-value")
+}
+
+func TestRequestRiskSensitiveFieldCoversCredentialVariants(t *testing.T) {
+	tests := []struct {
+		key       string
+		sensitive bool
+	}{
+		{key: "api_secret", sensitive: true},
+		{key: "auth-token", sensitive: true},
+		{key: "id_token", sensitive: true},
+		{key: "session_token", sensitive: true},
+		{key: "private_key", sensitive: true},
+		{key: "x_api_key", sensitive: true},
+		{key: "secret_access_key", sensitive: true},
+		{key: "credentials", sensitive: true},
+		{key: "openai_api_key", sensitive: true},
+		{key: "github_token", sensitive: true},
+		{key: "aws_secret_access_key", sensitive: true},
+		{key: "max_tokens", sensitive: false},
+		{key: "token_count", sensitive: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.key, func(t *testing.T) {
+			assert.Equal(t, test.sensitive, requestRiskSensitiveField(test.key))
+		})
+	}
+}
+
+func TestRequestRiskFullRequestSkipsMultipartBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader("multipart payload"))
+	c.Request.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+	storage, err := common.GetBodyStorage(c)
+	require.NoError(t, err)
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+
+	fullRequest, reason := requestRiskFullRequest(storage, c.Request.Header.Get("Content-Type"))
+
+	assert.Empty(t, fullRequest)
+	assert.Contains(t, reason, "multipart")
 }
 
 func TestRequestRiskGuardBlocksRepeatedModelSweep(t *testing.T) {
