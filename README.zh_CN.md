@@ -316,7 +316,7 @@ docker run --name new-api -d --restart always \
 | `SESSION_SECRET` | 鉴权签名密钥；所有节点必须保持一致                                           | - |
 | `SESSION_COOKIE_SECURE` | `false`/未配置时关闭 refresh/logout OriginGuard 以兼容本地 HTTP 开发代理；`true` 时启用 Secure Cookie 和严格 Origin 校验 | `false` |
 | `SESSION_COOKIE_TRUSTED_URL` | Secure 模式必填：允许调用 refresh/logout 的精确 HTTPS Origin，多个用英文逗号分隔；不是 relay CORS 白名单 | - |
-| `TRUSTED_PROXIES` | 未配置/留空时信任回环、RFC1918 和 IPv6 ULA 并输出启动告警；`none` 不信任任何代理；显式代理 IP/CIDR 列表完全替代默认值 | `127.0.0.0/8, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7` |
+| `TRUSTED_PROXIES` | 未配置/留空时仅信任回环、RFC1918 和 IPv6 ULA，关闭基于 IP 的请求风险限制并输出启动告警；`none` 不信任任何代理并使用直连地址启用 IP 风险限制；显式代理 IP/CIDR 列表完全替代默认值并启用 IP 风险限制 | `127.0.0.0/8, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7` |
 | `USER_SESSION_ACTIVE_LIMIT` | 单用户最大活跃登录 Session 数 | `50` |
 | `USER_SESSION_ISSUANCE_LIMIT` | 单用户在签发窗口内可创建的 Session 总数，包含已撤销 Session | `100` |
 | `USER_SESSION_ISSUANCE_WINDOW_SECONDS` | Session 签发计数窗口（秒）；高于 revoked 保留期时自动钳制 | `86400` |
@@ -325,7 +325,6 @@ docker run --name new-api -d --restart always \
 | `CRYPTO_SECRET` | 缓存键 HMAC 密钥；共享 Redis 的节点必须使用相同有效值 | 默认跟随 `SESSION_SECRET` |
 | `SQL_DSN` | 数据库连接字符串                                                     | - |
 | `REDIS_CONN_STRING` | Redis 连接字符串                                                  | - |
-| `TRUSTED_PROXIES` | 可信反向代理地址或 CIDR，多个使用英文逗号分隔；直连部署使用 `none`。未配置时不会启用基于 IP 的请求风险限制 | - |
 | `TRUSTED_IP_HEADERS` | 从可信代理读取真实客户端 IP 的 Header，多个使用英文逗号分隔，例如 `CF-Connecting-IP,X-Forwarded-For` | Gin 默认值 |
 | `STREAMING_TIMEOUT` | 流式超时时间（秒）                                                    | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | 流式扫描器单行最大缓冲（MB），图像生成等超大 `data:` 片段（如 4K 图片 base64）需适当调大 | `64` |

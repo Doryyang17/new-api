@@ -16,24 +16,14 @@ const (
 
 func configureTrustedProxyPolicy(engine *gin.Engine) error {
 	rawProxies := strings.TrimSpace(os.Getenv(trustedProxiesEnv))
-	if rawProxies == "" {
-		common.SetClientIPTrustConfigured(false)
-		common.SysLog("TRUSTED_PROXIES is not configured; IP-based request risk enforcement is disabled")
-		return nil
+	if err := configureTrustedProxies(engine); err != nil {
+		return err
 	}
 
-	if strings.EqualFold(rawProxies, "none") {
-		if err := engine.SetTrustedProxies(nil); err != nil {
-			return fmt.Errorf("disable trusted proxies: %w", err)
-		}
-	} else {
-		proxies := splitNonEmptyCSV(rawProxies)
-		if len(proxies) == 0 {
-			return fmt.Errorf("%s must contain at least one proxy address or use none", trustedProxiesEnv)
-		}
-		if err := engine.SetTrustedProxies(proxies); err != nil {
-			return fmt.Errorf("configure trusted proxies: %w", err)
-		}
+	if rawProxies == "" {
+		common.SetClientIPTrustConfigured(false)
+		common.SysLog("TRUSTED_PROXIES is not configured; only private proxy ranges are trusted and IP-based request risk enforcement is disabled")
+		return nil
 	}
 
 	if rawHeaders := strings.TrimSpace(os.Getenv(trustedIPHeadersEnv)); rawHeaders != "" {
