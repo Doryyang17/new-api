@@ -142,6 +142,8 @@ const CUSTOM_SECTIONS = [
           'request_risk_setting.enabled':
             settings['request_risk_setting.enabled'],
           'request_risk_setting.mode': settings['request_risk_setting.mode'],
+          'request_risk_setting.concurrency_mode':
+            settings['request_risk_setting.concurrency_mode'],
           'request_risk_setting.log_matches':
             settings['request_risk_setting.log_matches'],
           'request_risk_setting.medium_cooldown_seconds':

@@ -121,6 +121,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	defer middleware.ReleaseRequestProtection(c)
 
 	needCountToken := constant.CountToken
 	var meta *types.TokenCountMeta
@@ -149,6 +150,22 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	if priceData.FreeModel {
 		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
 	} else {
+		newAPIError = service.ValidatePreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
+		if newAPIError != nil {
+			return
+		}
+	}
+
+	if rejection := middleware.ApplyRequestProtection(c); rejection != nil {
+		if relayFormat == types.RelayFormatOpenAIRealtime {
+			helper.WssError(c, ws, middleware.NewRequestProtectionAPIError(c, rejection).ToOpenAIError())
+		} else {
+			middleware.WriteRequestProtectionResponse(c, rejection)
+		}
+		return
+	}
+
+	if !priceData.FreeModel {
 		newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
 		if newAPIError != nil {
 			return
@@ -156,7 +173,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	defer func() {
-		// Only return quota if downstream failed and quota was actually pre-consumed
+		// Only return quota if downstream failed and quota was actually pre-consumed.
 		if newAPIError != nil {
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
 			if relayInfo.Billing != nil {
@@ -403,6 +420,7 @@ func RelayMidjourney(c *gin.Context) {
 		})
 		return
 	}
+	defer middleware.ReleaseRequestProtection(c)
 
 	var mjErr *dto.MidjourneyResponse
 	switch relayInfo.RelayMode {
@@ -484,6 +502,7 @@ func RelayTask(c *gin.Context) {
 		})
 		return
 	}
+	defer middleware.ReleaseRequestProtection(c)
 	relayInfo.InitChannelMeta(c)
 
 	if taskErr := relay.ResolveOriginTask(c, relayInfo); taskErr != nil {
@@ -546,6 +565,9 @@ func RelayTask(c *gin.Context) {
 		c.Request.Body = io.NopCloser(bodyStorage)
 
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
+		if middleware.RequestProtectionBlocked(c) {
+			return
+		}
 		if taskErr == nil {
 			break
 		}

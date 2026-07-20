@@ -12,6 +12,8 @@ func TestValidateRequestRiskOption(t *testing.T) {
 	require.NoError(t, ValidateRequestRiskOption("request_risk_setting.enabled", "true"))
 	require.NoError(t, ValidateRequestRiskOption("request_risk_setting.mode", RequestRiskModeObserve))
 	require.NoError(t, ValidateRequestRiskOption("request_risk_setting.mode", RequestRiskModeEnforce))
+	require.NoError(t, ValidateRequestRiskOption("request_risk_setting.concurrency_mode", RequestRiskModeObserve))
+	require.NoError(t, ValidateRequestRiskOption("request_risk_setting.concurrency_mode", RequestRiskModeEnforce))
 	require.NoError(t, ValidateRequestRiskOption("request_risk_setting.token_block_seconds", "300"))
 	require.NoError(t, ValidateRequestRiskOption("request_risk_setting.user_concurrency_limit", "8"))
 	require.NoError(t, ValidateRequestRiskOption("request_risk_setting.token_concurrency_limit", "0"))
@@ -19,12 +21,21 @@ func TestValidateRequestRiskOption(t *testing.T) {
 
 	assert.Error(t, ValidateRequestRiskOption("request_risk_setting.enabled", "maybe"))
 	assert.Error(t, ValidateRequestRiskOption("request_risk_setting.mode", "block"))
+	assert.Error(t, ValidateRequestRiskOption("request_risk_setting.concurrency_mode", "block"))
 	assert.Error(t, ValidateRequestRiskOption("request_risk_setting.token_block_seconds", "0"))
 	assert.Error(t, ValidateRequestRiskOption("request_risk_setting.token_block_seconds", "86401"))
 	assert.Error(t, ValidateRequestRiskOption("request_risk_setting.user_concurrency_limit", "-1"))
 	assert.Error(t, ValidateRequestRiskOption("request_risk_setting.token_concurrency_limit", "1001"))
 	assert.Error(t, ValidateRequestRiskOption("request_risk_setting.group_whitelist", `{"group":"trusted"}`))
 	assert.Error(t, ValidateRequestRiskOption("request_risk_setting.unknown", "value"))
+}
+
+func TestEffectiveConcurrencyModeFallsBackToLegacyMode(t *testing.T) {
+	settings := RequestRiskSettings{Mode: RequestRiskModeEnforce}
+	assert.Equal(t, RequestRiskModeEnforce, settings.EffectiveConcurrencyMode())
+
+	settings.ConcurrencyMode = RequestRiskModeObserve
+	assert.Equal(t, RequestRiskModeObserve, settings.EffectiveConcurrencyMode())
 }
 
 func TestRequestRiskGroupWhitelistedNormalizesValues(t *testing.T) {

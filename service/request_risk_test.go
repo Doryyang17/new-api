@@ -11,7 +11,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func requestRiskTestSettings(mode string) system_setting.RequestRiskSettings {
@@ -96,6 +95,7 @@ func TestRequestRiskModelSweepTriggersMediumCooldown(t *testing.T) {
 
 	assert.Equal(t, RequestRiskLevelMedium, verdict.Level)
 	assert.Equal(t, 4, verdict.Score)
+	assert.True(t, verdict.Enforceable)
 	assert.True(t, verdict.Blocked)
 	assert.Contains(t, verdict.Factors, "model_sweep")
 
@@ -201,18 +201,53 @@ func TestRequestRiskObserveModeNeverBlocks(t *testing.T) {
 	assert.Equal(t, RequestRiskLevelMedium, verdict.Level)
 }
 
-func TestRequestRiskFastFailureRetryAddsRisk(t *testing.T) {
+func TestRequestRiskRepeatedSubstantiveRequestAloneDoesNotBlock(t *testing.T) {
 	withRequestRiskMemoryStore(t)
 	settings := requestRiskTestSettings(system_setting.RequestRiskModeEnforce)
-	input := RequestRiskInput{UserID: 1, TokenID: 2, Model: "gpt-5", Text: "ping"}
-	first := EvaluateRequestRisk(context.Background(), input, settings)
-	require.NotEmpty(t, first.Fingerprint)
-	RecordRequestRiskFailure(context.Background(), input, first.Fingerprint)
+	input := RequestRiskInput{UserID: 1, TokenID: 2, Model: "gpt-5", Text: "从中断的位置继续完成刚才的任务"}
+	var verdict RequestRiskVerdict
+	for range 6 {
+		verdict = EvaluateRequestRisk(context.Background(), input, settings)
+	}
 
-	second := EvaluateRequestRisk(context.Background(), input, settings)
-	assert.Equal(t, RequestRiskLevelMedium, second.Level)
-	assert.True(t, second.Blocked)
-	assert.Contains(t, second.Factors, "fast_failure_retry")
+	assert.Equal(t, RequestRiskLevelLow, verdict.Level)
+	assert.Equal(t, 2, verdict.Score)
+	assert.False(t, verdict.Blocked)
+	assert.Equal(t, []string{"repeated_content_high"}, verdict.Factors)
+}
+
+func TestRequestRiskRepeatedSubstantiveRequestWithMildBurstRemainsObserveOnly(t *testing.T) {
+	withRequestRiskMemoryStore(t)
+	settings := requestRiskTestSettings(system_setting.RequestRiskModeEnforce)
+	input := RequestRiskInput{UserID: 1, TokenID: 2, Model: "gpt-5", Text: "更新计划"}
+	var verdict RequestRiskVerdict
+	for range 10 {
+		verdict = EvaluateRequestRisk(context.Background(), input, settings)
+	}
+
+	assert.Equal(t, RequestRiskLevelMedium, verdict.Level)
+	assert.Equal(t, 3, verdict.Score)
+	assert.False(t, verdict.Enforceable)
+	assert.True(t, verdict.Observed)
+	assert.False(t, verdict.Blocked)
+	assert.ElementsMatch(t, []string{"burst_10s", "repeated_content_high"}, verdict.Factors)
+}
+
+func TestRequestRiskRepeatedMeaninglessTextWithoutHardSignalRemainsObserveOnly(t *testing.T) {
+	withRequestRiskMemoryStore(t)
+	settings := requestRiskTestSettings(system_setting.RequestRiskModeEnforce)
+	input := RequestRiskInput{UserID: 1, TokenID: 2, Model: "gpt-5", Text: "test"}
+	var verdict RequestRiskVerdict
+	for range 6 {
+		verdict = EvaluateRequestRisk(context.Background(), input, settings)
+	}
+
+	assert.Equal(t, RequestRiskLevelMedium, verdict.Level)
+	assert.Equal(t, 3, verdict.Score)
+	assert.False(t, verdict.Enforceable)
+	assert.True(t, verdict.Observed)
+	assert.False(t, verdict.Blocked)
+	assert.ElementsMatch(t, []string{"meaningless_exact_match", "repeated_content_high"}, verdict.Factors)
 }
 
 func TestRequestRiskMemoryPruningIsRateLimited(t *testing.T) {

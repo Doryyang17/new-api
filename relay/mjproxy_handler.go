@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -22,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -189,6 +191,21 @@ func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjo
 	return
 }
 
+func validateMidjourneyChargeBeforeProtection(c *gin.Context, quota int, relayInfo *relaycommon.RelayInfo) *dto.MidjourneyResponse {
+	apiErr := service.ValidateImmediateWalletCharge(c, quota, relayInfo)
+	if apiErr == nil {
+		return nil
+	}
+	description := apiErr.Err.Error()
+	if apiErr.GetErrorCode() == types.ErrorCodeInsufficientUserQuota {
+		description = "quota_not_enough"
+	}
+	return &dto.MidjourneyResponse{
+		Code:        4,
+		Description: description,
+	}
+}
+
 func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyResponse {
 	var swapFaceRequest dto.SwapFaceRequest
 	err := common.UnmarshalBodyReusable(c, &swapFaceRequest)
@@ -211,23 +228,12 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		}
 	}
 
-	userQuota, err := model.GetUserQuota(info.UserId, false)
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: err.Error(),
-		}
+	if billingErr := validateMidjourneyChargeBeforeProtection(c, priceData.Quota, info); billingErr != nil {
+		return billingErr
 	}
-
-	bonusAmount, err := model.GetActiveCheckinBonusAmount(info.UserId, time.Now())
-	if err != nil {
-		return &dto.MidjourneyResponse{Code: 4, Description: err.Error()}
-	}
-	if userQuota+bonusAmount-priceData.Quota < 0 {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "quota_not_enough",
-		}
+	if rejection := middleware.ApplyRequestProtection(c); rejection != nil {
+		middleware.WriteRequestProtectionResponse(c, rejection)
+		return nil
 	}
 	requestURL := getMjRequestPath(c.Request.URL.String())
 	baseURL := c.GetString("base_url")
@@ -527,23 +533,14 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 
-	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: err.Error(),
+	if consumeQuota {
+		if billingErr := validateMidjourneyChargeBeforeProtection(c, priceData.Quota, relayInfo); billingErr != nil {
+			return billingErr
 		}
 	}
-
-	bonusAmount, err := model.GetActiveCheckinBonusAmount(relayInfo.UserId, time.Now())
-	if err != nil {
-		return &dto.MidjourneyResponse{Code: 4, Description: err.Error()}
-	}
-	if consumeQuota && userQuota+bonusAmount-priceData.Quota < 0 {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "quota_not_enough",
-		}
+	if rejection := middleware.ApplyRequestProtection(c); rejection != nil {
+		middleware.WriteRequestProtectionResponse(c, rejection)
+		return nil
 	}
 
 	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)

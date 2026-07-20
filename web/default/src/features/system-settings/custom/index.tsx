@@ -66,6 +66,7 @@ const defaultCustomSettings: CustomSettings = {
   'checkin_bonus_setting.max_amount': 500000,
   'request_risk_setting.enabled': false,
   'request_risk_setting.mode': 'observe',
+  'request_risk_setting.concurrency_mode': '',
   'request_risk_setting.log_matches': true,
   'request_risk_setting.medium_cooldown_seconds': 10,
   'request_risk_setting.token_block_seconds': 300,

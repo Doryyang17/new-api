@@ -25,6 +25,7 @@ func withMiddlewareRequestConcurrencySettings(t *testing.T, mode string, userLim
 	*cfg = system_setting.RequestRiskSettings{
 		Enabled:               true,
 		Mode:                  mode,
+		ConcurrencyMode:       mode,
 		LogMatches:            false,
 		UserConcurrencyLimit:  userLimit,
 		TokenConcurrencyLimit: tokenLimit,
@@ -43,8 +44,12 @@ func newRequestConcurrencyTestEngine(userID int, tokenID int, group string, star
 		c.Set("group", group)
 		c.Next()
 	})
-	engine.Use(RequestConcurrencyGuard())
 	engine.POST("/v1/chat/completions", func(c *gin.Context) {
+		if rejection := ApplyRequestProtection(c); rejection != nil {
+			WriteRequestProtectionResponse(c, rejection)
+			return
+		}
+		defer ReleaseRequestProtection(c)
 		started <- struct{}{}
 		<-release
 		c.Status(http.StatusOK)
@@ -60,7 +65,7 @@ func performConcurrentRequest(engine *gin.Engine) *httptest.ResponseRecorder {
 	return resp
 }
 
-func TestRequestConcurrencyGuardBlocksAndReleasesTokenSlot(t *testing.T) {
+func TestRequestProtectionBlocksAndReleasesTokenConcurrencySlot(t *testing.T) {
 	withMiddlewareRequestConcurrencySettings(t, system_setting.RequestRiskModeEnforce, 4, 1, nil)
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
@@ -105,7 +110,7 @@ func TestRequestConcurrencyGuardBlocksAndReleasesTokenSlot(t *testing.T) {
 	assert.Equal(t, http.StatusOK, third.Code)
 }
 
-func TestRequestConcurrencyGuardObserveModeDoesNotBlock(t *testing.T) {
+func TestRequestProtectionConcurrencyObserveModeDoesNotBlock(t *testing.T) {
 	withMiddlewareRequestConcurrencySettings(t, system_setting.RequestRiskModeObserve, 1, 1, nil)
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
@@ -133,7 +138,7 @@ func TestRequestConcurrencyGuardObserveModeDoesNotBlock(t *testing.T) {
 	assert.Equal(t, http.StatusOK, responses[1].Code)
 }
 
-func TestRequestConcurrencyGuardSkipsWhitelistedGroup(t *testing.T) {
+func TestRequestProtectionConcurrencySkipsWhitelistedGroup(t *testing.T) {
 	withMiddlewareRequestConcurrencySettings(t, system_setting.RequestRiskModeEnforce, 1, 1, []string{"trusted"})
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false

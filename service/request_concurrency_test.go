@@ -16,9 +16,26 @@ func requestConcurrencyTestSettings(mode string, userLimit int, tokenLimit int) 
 	return system_setting.RequestRiskSettings{
 		Enabled:               true,
 		Mode:                  mode,
+		ConcurrencyMode:       mode,
 		UserConcurrencyLimit:  userLimit,
 		TokenConcurrencyLimit: tokenLimit,
 	}
+}
+
+func TestRequestConcurrencyModeIsIndependentFromRiskMode(t *testing.T) {
+	withRequestConcurrencyMemoryStore(t)
+	settings := requestConcurrencyTestSettings(system_setting.RequestRiskModeObserve, 1, 1)
+	settings.ConcurrencyMode = system_setting.RequestRiskModeEnforce
+	input := RequestRiskInput{UserID: 5, TokenID: 51}
+
+	first, _ := AcquireRequestConcurrency(context.Background(), input, settings)
+	blocked, verdict := AcquireRequestConcurrency(context.Background(), input, settings)
+
+	require.NotNil(t, first)
+	assert.Nil(t, blocked)
+	assert.False(t, verdict.Allowed)
+	assert.True(t, verdict.TokenExceeded)
+	ReleaseRequestConcurrency(first)
 }
 
 func withRequestConcurrencyMemoryStore(t *testing.T) {

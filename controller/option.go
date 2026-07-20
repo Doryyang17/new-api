@@ -131,7 +131,7 @@ type requestRiskOptionsUpdateRequest struct {
 
 func UpdateRequestRiskOptions(c *gin.Context) {
 	var request requestRiskOptionsUpdateRequest
-	if err := common.DecodeJson(c.Request.Body, &request); err != nil || len(request.Updates) == 0 || len(request.Updates) > 10 {
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil || len(request.Updates) == 0 || len(request.Updates) > 11 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": "无效的参数",

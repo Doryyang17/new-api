@@ -28,51 +28,43 @@ const (
 	requestRiskMaxSanitizeDepth      = 64
 )
 
-func RequestRiskGuard() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		settings := system_setting.GetRequestRiskSettings()
-		if !settings.Enabled || !isModelGenerationRequest(c) {
-			c.Next()
-			return
-		}
+func applyRequestRiskProtection(c *gin.Context, settings system_setting.RequestRiskSettings) *RequestProtectionRejection {
+	if !isModelGenerationRequest(c) {
+		return nil
+	}
 
-		group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-		if system_setting.RequestRiskGroupWhitelisted(group, settings) {
-			c.Next()
-			return
-		}
+	input := service.RequestRiskInput{
+		UserID:  c.GetInt("id"),
+		TokenID: c.GetInt("token_id"),
+	}
+	if common.IsClientIPTrustConfigured() {
+		input.ClientIP = c.ClientIP()
+	}
 
-		input := service.RequestRiskInput{
-			UserID:  c.GetInt("id"),
-			TokenID: c.GetInt("token_id"),
-		}
-		if common.IsClientIPTrustConfigured() {
-			input.ClientIP = c.ClientIP()
-		}
-
-		if verdict, found := service.GetActiveRequestRiskBlockVerdict(c.Request.Context(), input, settings); found {
-			if settings.LogMatches && service.AcquireRequestRiskLogSlot(c.Request.Context(), verdict.ScopeKey) {
-				recordRequestRiskEvent(c, input, verdict, settings.Mode)
-			}
-			writeRequestRiskResponse(c, verdict.RetryAfter)
-			return
-		}
-
-		populateRequestRiskProfile(c, &input)
-		verdict := service.EvaluateRequestRiskBehavior(c.Request.Context(), input, settings)
-		if verdict.Score >= 3 && settings.LogMatches && service.AcquireRequestRiskLogSlot(c.Request.Context(), verdict.ScopeKey) {
-			populateRequestRiskLogDetails(c, &input)
+	if verdict, found := service.GetActiveRequestRiskBlockVerdict(c.Request.Context(), input, settings); found {
+		if settings.LogMatches && service.AcquireRequestRiskLogSlot(c.Request.Context(), verdict.ScopeKey) {
 			recordRequestRiskEvent(c, input, verdict, settings.Mode)
 		}
-		if verdict.Blocked {
-			writeRequestRiskResponse(c, verdict.RetryAfter)
-			return
+		return &RequestProtectionRejection{
+			RetryAfter: verdict.RetryAfter,
+			Message:    system_setting.DefaultRequestRiskMessage,
+			ErrorCode:  types.ErrorCodeRequestProbeRateLimited,
 		}
+	}
 
-		c.Next()
-		if shouldRecordRequestRiskFailure(c) {
-			service.RecordRequestRiskFailure(c.Request.Context(), input, verdict.Fingerprint)
-		}
+	populateRequestRiskProfile(c, &input)
+	verdict := service.EvaluateRequestRiskBehavior(c.Request.Context(), input, settings)
+	if verdict.Score >= 3 && settings.LogMatches && service.AcquireRequestRiskLogSlot(c.Request.Context(), verdict.ScopeKey) {
+		populateRequestRiskLogDetails(c, &input)
+		recordRequestRiskEvent(c, input, verdict, settings.Mode)
+	}
+	if !verdict.Blocked {
+		return nil
+	}
+	return &RequestProtectionRejection{
+		RetryAfter: verdict.RetryAfter,
+		Message:    system_setting.DefaultRequestRiskMessage,
+		ErrorCode:  types.ErrorCodeRequestProbeRateLimited,
 	}
 }
 
@@ -244,17 +236,6 @@ func resetRequestRiskBody(c *gin.Context, storage common.BodyStorage) {
 	}
 }
 
-func shouldRecordRequestRiskFailure(c *gin.Context) bool {
-	if c == nil || c.Request == nil || c.Request.Context().Err() != nil {
-		return false
-	}
-	status := c.Writer.Status()
-	if status < http.StatusBadRequest {
-		return false
-	}
-	return !common.GetContextKeyBool(c, constant.ContextKeyPromptFilterBlocked)
-}
-
 func recordRequestRiskEvent(c *gin.Context, input service.RequestRiskInput, verdict service.RequestRiskVerdict, mode string) {
 	adminInfo := map[string]interface{}{
 		"endpoint":             c.Request.URL.Path,
@@ -262,14 +243,14 @@ func recordRequestRiskEvent(c *gin.Context, input service.RequestRiskInput, verd
 		"risk_score":           verdict.Score,
 		"risk_factors":         verdict.Factors,
 		"request_risk_mode":    mode,
-		"would_block":          verdict.Score >= 3,
+		"enforceable":          verdict.Enforceable,
+		"would_block":          verdict.Score >= 3 && verdict.Enforceable,
 		"retry_after_seconds":  retryAfterSeconds(verdict.RetryAfter),
 		"request_count_10s":    verdict.Metrics.RequestCount10s,
 		"request_count_60s":    verdict.Metrics.RequestCount60s,
 		"ip_request_count_60s": verdict.Metrics.IPRequestCount60s,
 		"repeat_count_60s":     verdict.Metrics.RepeatCount60s,
 		"distinct_models_60s":  verdict.Metrics.DistinctModels60s,
-		"failure_count_30s":    verdict.Metrics.FailureCount30s,
 	}
 	trimmedText := strings.TrimSpace(input.ExtractedText)
 	if trimmedText == "" {
@@ -326,15 +307,6 @@ func requestRiskTextPreview(text string) string {
 		return text
 	}
 	return string(runes[:requestRiskTextPreviewRunes]) + "…"
-}
-
-func writeRequestRiskResponse(c *gin.Context, retryAfter time.Duration) {
-	writeRequestProtectionResponse(
-		c,
-		retryAfter,
-		system_setting.DefaultRequestRiskMessage,
-		types.ErrorCodeRequestProbeRateLimited,
-	)
 }
 
 func writeRequestProtectionResponse(c *gin.Context, retryAfter time.Duration, rawMessage string, errorCode types.ErrorCode) {

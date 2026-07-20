@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
@@ -202,9 +203,20 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		noteTaskQuotaClamp(info, clamp)
 	}
 
-	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
-	if info.Billing == nil && !info.PriceData.FreeModel {
+	// 7. 原生计费预检（仅首次）
+	needsPreConsume := info.Billing == nil && !info.PriceData.FreeModel
+	if needsPreConsume {
 		info.ForcePreConsume = true
+		if apiErr := service.ValidatePreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
+			return nil, service.TaskErrorFromAPIError(apiErr)
+		}
+	}
+	if rejection := middleware.ApplyRequestProtection(c); rejection != nil {
+		middleware.WriteRequestProtectionResponse(c, rejection)
+		return nil, nil
+	}
+	// 7.5 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
+	if needsPreConsume {
 		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
 			return nil, service.TaskErrorFromAPIError(apiErr)
 		}

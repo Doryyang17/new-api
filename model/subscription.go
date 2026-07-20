@@ -851,6 +851,47 @@ func HasActiveUserSubscription(userId int) (bool, error) {
 	return count > 0, nil
 }
 
+// CanPreConsumeUserSubscription performs a read-only quota eligibility check.
+// It mirrors the quota-reset semantics used by PreConsumeUserSubscription but
+// does not reserve quota or create a pre-consume record.
+func CanPreConsumeUserSubscription(userId int, amount int64) (bool, error) {
+	if userId <= 0 {
+		return false, errors.New("invalid userId")
+	}
+	if amount <= 0 {
+		return true, nil
+	}
+	now := GetDBTimestamp()
+	var subscriptions []UserSubscription
+	if err := DB.Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
+		Order("end_time asc, id asc").
+		Find(&subscriptions).Error; err != nil {
+		return false, err
+	}
+	for _, subscription := range subscriptions {
+		plan, err := getSubscriptionPlanByIdTx(DB, subscription.PlanId)
+		if err != nil {
+			return false, err
+		}
+		amountUsed := subscription.AmountUsed
+		if !(subscription.NextResetTime > 0 && subscription.NextResetTime > now) &&
+			NormalizeResetPeriod(plan.QuotaResetPeriod) != SubscriptionResetNever {
+			baseUnix := subscription.LastResetTime
+			if baseUnix <= 0 {
+				baseUnix = subscription.StartTime
+			}
+			nextResetTime := calcNextResetTime(time.Unix(baseUnix, 0), plan, subscription.EndTime)
+			if nextResetTime > 0 && nextResetTime <= now {
+				amountUsed = 0
+			}
+		}
+		if subscription.AmountTotal <= 0 || subscription.AmountTotal-amountUsed >= amount {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // UserActiveSubscriptionsAllowWalletOverflow returns whether wallet balance may be used
 // after the user's subscription quota is exhausted. A single active subscription that
 // disallows wallet overflow (allow_wallet_overflow = false) blocks the fallback.

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	appI18n "github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -65,8 +64,12 @@ func newRequestRiskTestEngine(userID int, tokenID int, handled *int) *gin.Engine
 		c.Set("group", "default")
 		c.Next()
 	})
-	engine.Use(RequestRiskGuard())
 	engine.POST("/v1/chat/completions", func(c *gin.Context) {
+		if rejection := ApplyRequestProtection(c); rejection != nil {
+			WriteRequestProtectionResponse(c, rejection)
+			return
+		}
+		defer ReleaseRequestProtection(c)
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
@@ -89,7 +92,7 @@ func performRequestRiskRequest(engine *gin.Engine, model string, text string) *h
 	return resp
 }
 
-func TestRequestRiskGuardKeepsSingleShortPromptBodyReusable(t *testing.T) {
+func TestRequestProtectionKeepsSingleShortPromptBodyReusable(t *testing.T) {
 	withMiddlewareRequestRiskSettings(t, system_setting.RequestRiskModeEnforce)
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
@@ -275,7 +278,7 @@ func TestRequestRiskFullRequestSkipsMultipartBody(t *testing.T) {
 	assert.Contains(t, reason, "multipart")
 }
 
-func TestRequestRiskGuardBlocksRepeatedModelSweep(t *testing.T) {
+func TestRequestProtectionBlocksRepeatedModelSweep(t *testing.T) {
 	withMiddlewareRequestRiskSettings(t, system_setting.RequestRiskModeEnforce)
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
@@ -296,7 +299,7 @@ func TestRequestRiskGuardBlocksRepeatedModelSweep(t *testing.T) {
 	assert.Equal(t, 3, handled)
 }
 
-func TestRequestRiskGuardRejectsActiveBlockBeforeReadingBody(t *testing.T) {
+func TestRequestProtectionActiveBlockDoesNotRereadBody(t *testing.T) {
 	withMiddlewareRequestRiskSettings(t, system_setting.RequestRiskModeEnforce)
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
@@ -322,7 +325,7 @@ func TestRequestRiskGuardRejectsActiveBlockBeforeReadingBody(t *testing.T) {
 	assert.Equal(t, 3, handled)
 }
 
-func TestRequestRiskGuardObserveModeDoesNotBlock(t *testing.T) {
+func TestRequestProtectionObserveModeDoesNotBlock(t *testing.T) {
 	withMiddlewareRequestRiskSettings(t, system_setting.RequestRiskModeObserve)
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
@@ -346,16 +349,20 @@ func newJimengRequestRiskTestEngine(userID int, tokenID int, handled *int) *gin.
 		c.Set("group", "default")
 		c.Next()
 	})
-	engine.Use(RequestRiskGuard())
 	engine.Use(JimengRequestConvert())
 	engine.POST("/jimeng/", func(c *gin.Context) {
+		if rejection := ApplyRequestProtection(c); rejection != nil {
+			WriteRequestProtectionResponse(c, rejection)
+			return
+		}
+		defer ReleaseRequestProtection(c)
 		(*handled)++
 		c.Status(http.StatusOK)
 	})
 	return engine
 }
 
-func TestRequestRiskGuardSeesJimengValidationFailures(t *testing.T) {
+func TestJimengValidationFailureRunsBeforeRequestProtection(t *testing.T) {
 	withMiddlewareRequestRiskSettings(t, system_setting.RequestRiskModeEnforce)
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
@@ -375,12 +382,11 @@ func TestRequestRiskGuardSeesJimengValidationFailures(t *testing.T) {
 	engine.ServeHTTP(second, secondRequest)
 
 	assert.Equal(t, http.StatusBadRequest, first.Code)
-	assert.Equal(t, http.StatusTooManyRequests, second.Code)
-	assert.Contains(t, second.Body.String(), string(types.ErrorCodeRequestProbeRateLimited))
+	assert.Equal(t, http.StatusBadRequest, second.Code)
 	assert.Zero(t, handled)
 }
 
-func TestRequestRiskGuardTracksJimengReqKeyModelSweep(t *testing.T) {
+func TestRequestProtectionTracksJimengReqKeyModelSweep(t *testing.T) {
 	withMiddlewareRequestRiskSettings(t, system_setting.RequestRiskModeEnforce)
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
@@ -419,8 +425,12 @@ func TestPlaygroundRequestedGroupIsResolvedBeforeRiskWhitelist(t *testing.T) {
 		c.Next()
 	})
 	engine.Use(ResolvePlaygroundGroup())
-	engine.Use(RequestRiskGuard())
 	engine.POST("/pg/chat/completions", func(c *gin.Context) {
+		if rejection := ApplyRequestProtection(c); rejection != nil {
+			WriteRequestProtectionResponse(c, rejection)
+			return
+		}
+		defer ReleaseRequestProtection(c)
 		handled++
 		c.Status(http.StatusOK)
 	})
@@ -561,50 +571,71 @@ func TestApplyPlaygroundGroupRejectsHeaderBodyMismatch(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
-func TestRequestRiskGuardRecordsFailuresBeforeChannelSelection(t *testing.T) {
+func TestNativeBusinessErrorsRunBeforeRequestProtection(t *testing.T) {
 	withMiddlewareRequestRiskSettings(t, system_setting.RequestRiskModeEnforce)
-	promptSettings, ok := config.GlobalConfig.Get("prompt_filter_setting").(*system_setting.PromptFilterSettings)
-	require.True(t, ok)
-	previousPromptSettings := *promptSettings
-	promptSettings.BlockStatusCode = http.StatusBadRequest
-	t.Cleanup(func() { *promptSettings = previousPromptSettings })
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
 	t.Cleanup(func() { common.RedisEnabled = oldRedisEnabled })
 
-	handled := 0
-	engine := gin.New()
-	engine.Use(BodyStorageCleanup())
-	engine.Use(func(c *gin.Context) {
-		c.Set("id", 51005)
-		c.Set("token_id", 52005)
-		c.Set("group", "default")
-		c.Next()
-	})
-	engine.Use(RequestRiskGuard())
-	engine.POST("/v1/chat/completions", func(c *gin.Context) {
-		handled++
-		c.Status(http.StatusBadRequest)
-	})
+	tests := []struct {
+		name       string
+		statusCode int
+		errorCode  string
+	}{
+		{name: "missing model", statusCode: http.StatusServiceUnavailable, errorCode: "model_not_found"},
+		{name: "insufficient balance", statusCode: http.StatusForbidden, errorCode: "insufficient_user_quota"},
+		{name: "invalid parameter", statusCode: http.StatusBadRequest, errorCode: "invalid_request"},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			protectionCalls := 0
+			engine := gin.New()
+			engine.Use(BodyStorageCleanup())
+			engine.Use(func(c *gin.Context) {
+				c.Set("id", 51005+index)
+				c.Set("token_id", 52005+index)
+				c.Set("group", "default")
+				c.Next()
+			})
+			engine.Use(func(c *gin.Context) {
+				if c.GetHeader("X-Test-Native-Error") == test.errorCode {
+					c.JSON(test.statusCode, gin.H{"error": gin.H{"code": test.errorCode}})
+					c.Abort()
+					return
+				}
+				c.Next()
+			})
+			engine.POST("/v1/chat/completions", func(c *gin.Context) {
+				protectionCalls++
+				if rejection := ApplyRequestProtection(c); rejection != nil {
+					WriteRequestProtectionResponse(c, rejection)
+					return
+				}
+				defer ReleaseRequestProtection(c)
+				c.Status(http.StatusOK)
+			})
 
-	first := performRequestRiskRequest(engine, "missing-model", "repeat this request")
-	second := performRequestRiskRequest(engine, "missing-model", "repeat this request")
-	third := performRequestRiskRequest(engine, "missing-model", "repeat this request")
+			for range 4 {
+				request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"missing-model","messages":[{"role":"user","content":"repeat this request"}]}`))
+				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set("X-Test-Native-Error", test.errorCode)
+				response := httptest.NewRecorder()
+				engine.ServeHTTP(response, request)
+				assert.Equal(t, test.statusCode, response.Code)
+				assert.Contains(t, response.Body.String(), test.errorCode)
+				assert.NotContains(t, response.Body.String(), string(types.ErrorCodeRequestProbeRateLimited))
+			}
+			assert.Zero(t, protectionCalls)
 
-	assert.Equal(t, http.StatusBadRequest, first.Code)
-	assert.Equal(t, http.StatusBadRequest, second.Code)
-	assert.Equal(t, http.StatusTooManyRequests, third.Code)
-	assert.Equal(t, 2, handled)
-}
-
-func TestShouldRecordRequestRiskFailureUsesPromptFilterMarker(t *testing.T) {
-	context, _ := gin.CreateTestContext(httptest.NewRecorder())
-	context.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
-	context.Status(http.StatusBadRequest)
-
-	assert.True(t, shouldRecordRequestRiskFailure(context))
-	common.SetContextKey(context, constant.ContextKeyPromptFilterBlocked, true)
-	assert.False(t, shouldRecordRequestRiskFailure(context))
+			var response *httptest.ResponseRecorder
+			for _, model := range []string{"gpt-a", "gpt-b", "gpt-c", "gpt-d"} {
+				response = performRequestRiskRequest(engine, model, "hi")
+			}
+			require.NotNil(t, response)
+			assert.Equal(t, http.StatusTooManyRequests, response.Code)
+			assert.Equal(t, 4, protectionCalls)
+		})
+	}
 }
 
 func TestWriteRequestProtectionResponseUsesMatchedRouteAfterAdapterRewrite(t *testing.T) {

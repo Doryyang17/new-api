@@ -28,6 +28,7 @@ const (
 type RequestRiskSettings struct {
 	Enabled               bool     `json:"enabled"`
 	Mode                  string   `json:"mode"`
+	ConcurrencyMode       string   `json:"concurrency_mode"`
 	LogMatches            bool     `json:"log_matches"`
 	MediumCooldownSeconds int      `json:"medium_cooldown_seconds"`
 	TokenBlockSeconds     int      `json:"token_block_seconds"`
@@ -61,6 +62,7 @@ func GetRequestRiskSettings() RequestRiskSettings {
 	settings.GroupWhitelist = append([]string(nil), requestRiskSettings.GroupWhitelist...)
 	common.OptionMapRWMutex.RUnlock()
 	settings.Mode = normalizeRequestRiskMode(settings.Mode)
+	settings.ConcurrencyMode = normalizeRequestRiskModeWithFallback(settings.ConcurrencyMode, settings.Mode)
 	settings.MediumCooldownSeconds = normalizePositiveSeconds(settings.MediumCooldownSeconds, DefaultRequestRiskMediumCooldownSeconds)
 	settings.TokenBlockSeconds = normalizePositiveSeconds(settings.TokenBlockSeconds, DefaultRequestRiskTokenBlockSeconds)
 	settings.UserBlockSeconds = normalizePositiveSeconds(settings.UserBlockSeconds, DefaultRequestRiskUserBlockSeconds)
@@ -78,7 +80,7 @@ func ValidateRequestRiskOption(key string, value string) error {
 		if _, err := strconv.ParseBool(value); err != nil {
 			return fmt.Errorf("invalid request risk boolean value %q", value)
 		}
-	case "request_risk_setting.mode":
+	case "request_risk_setting.mode", "request_risk_setting.concurrency_mode":
 		if value != RequestRiskModeObserve && value != RequestRiskModeEnforce {
 			return fmt.Errorf("invalid request risk mode %q", value)
 		}
@@ -127,6 +129,18 @@ func normalizeRequestRiskMode(value string) string {
 		return RequestRiskModeEnforce
 	}
 	return RequestRiskModeObserve
+}
+
+func normalizeRequestRiskModeWithFallback(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == RequestRiskModeObserve || value == RequestRiskModeEnforce {
+		return value
+	}
+	return normalizeRequestRiskMode(fallback)
+}
+
+func (settings RequestRiskSettings) EffectiveConcurrencyMode() string {
+	return normalizeRequestRiskModeWithFallback(settings.ConcurrencyMode, settings.Mode)
 }
 
 func normalizePositiveSeconds(value int, fallback int) int {

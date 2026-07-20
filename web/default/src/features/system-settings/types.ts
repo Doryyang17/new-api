@@ -602,6 +602,7 @@ export type CustomSettings = {
   'checkin_bonus_setting.max_amount': number
   'request_risk_setting.enabled': boolean
   'request_risk_setting.mode': 'observe' | 'enforce'
+  'request_risk_setting.concurrency_mode': '' | 'observe' | 'enforce'
   'request_risk_setting.log_matches': boolean
   'request_risk_setting.medium_cooldown_seconds': number
   'request_risk_setting.token_block_seconds': number

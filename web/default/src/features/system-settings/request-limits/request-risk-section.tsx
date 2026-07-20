@@ -62,6 +62,7 @@ const requestRiskSchema = z.object({
   request_risk_setting: z.object({
     enabled: z.boolean(),
     mode: z.enum(['observe', 'enforce']),
+    concurrency_mode: z.enum(['observe', 'enforce']),
     log_matches: z.boolean(),
     medium_cooldown_seconds: z.number().int().min(1).max(86400),
     token_block_seconds: z.number().int().min(1).max(86400),
@@ -79,6 +80,7 @@ type RequestRiskFormInput = z.input<typeof requestRiskSchema>
 export type RequestRiskDefaults = {
   'request_risk_setting.enabled': boolean
   'request_risk_setting.mode': 'observe' | 'enforce'
+  'request_risk_setting.concurrency_mode': '' | 'observe' | 'enforce'
   'request_risk_setting.log_matches': boolean
   'request_risk_setting.medium_cooldown_seconds': number
   'request_risk_setting.token_block_seconds': number
@@ -98,6 +100,21 @@ const modeItems = [
   { value: 'enforce', label: '拦截模式' },
 ] as const
 
+const concurrencyModeItems = [
+  { value: 'observe', label: '观察模式' },
+  { value: 'enforce', label: '限制模式' },
+] as const
+
+function resolveMode(
+  value: '' | 'observe' | 'enforce',
+  fallback: 'observe' | 'enforce'
+): 'observe' | 'enforce' {
+  if (value === 'observe' || value === 'enforce') {
+    return value
+  }
+  return fallback
+}
+
 function buildFormDefaults(
   defaults: RequestRiskDefaults
 ): RequestRiskFormInput {
@@ -105,6 +122,10 @@ function buildFormDefaults(
     request_risk_setting: {
       enabled: defaults['request_risk_setting.enabled'],
       mode: defaults['request_risk_setting.mode'],
+      concurrency_mode: resolveMode(
+        defaults['request_risk_setting.concurrency_mode'],
+        defaults['request_risk_setting.mode']
+      ),
       log_matches: defaults['request_risk_setting.log_matches'],
       medium_cooldown_seconds:
         defaults['request_risk_setting.medium_cooldown_seconds'],
@@ -138,6 +159,8 @@ function normalizeFormValues(
   return {
     'request_risk_setting.enabled': values.request_risk_setting.enabled,
     'request_risk_setting.mode': values.request_risk_setting.mode,
+    'request_risk_setting.concurrency_mode':
+      values.request_risk_setting.concurrency_mode,
     'request_risk_setting.log_matches': values.request_risk_setting.log_matches,
     'request_risk_setting.medium_cooldown_seconds':
       values.request_risk_setting.medium_cooldown_seconds,
@@ -195,7 +218,8 @@ export function RequestRiskSection(props: RequestRiskSectionProps) {
   }, [form, props.defaultValues])
 
   const enabled = form.watch('request_risk_setting.enabled')
-  const mode = form.watch('request_risk_setting.mode')
+  const riskMode = form.watch('request_risk_setting.mode')
+  const concurrencyMode = form.watch('request_risk_setting.concurrency_mode')
 
   const onSubmit = async (values: RequestRiskFormValues) => {
     const normalized = normalizeFormValues(values)
@@ -238,9 +262,9 @@ export function RequestRiskSection(props: RequestRiskSectionProps) {
           <Form {...form}>
             <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
               <Alert>
-                <AlertTitle>建议先使用观察模式</AlertTitle>
+                <AlertTitle>批量测活建议先使用观察模式</AlertTitle>
                 <AlertDescription>
-                  观察模式只记录中高风险行为和并发超限，不改变请求结果。确认正常用户没有误命中后，再切换到拦截模式。
+                  批量测活与并发限制可分别设置运行模式。建议先观察行为评分，同时保留并发限制，确认没有误命中后再启用测活拦截。
                 </AlertDescription>
               </Alert>
 
@@ -252,7 +276,7 @@ export function RequestRiskSection(props: RequestRiskSectionProps) {
                     <SettingsSwitchContent>
                       <FormLabel>启用批量测活与并发防护</FormLabel>
                       <FormDescription>
-                        根据请求频率、重复内容、模型轮询、失败重试和在途并发综合保护，不会永久封禁用户或令牌。
+                        根据请求频率、模型轮询和在途并发进行保护。重复内容只作为辅助证据，业务失败和失败重试不参与拦截。
                       </FormDescription>
                     </SettingsSwitchContent>
                     <FormControl>
@@ -271,7 +295,7 @@ export function RequestRiskSection(props: RequestRiskSectionProps) {
                   name='request_risk_setting.mode'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>运行模式</FormLabel>
+                      <FormLabel>批量测活模式</FormLabel>
                       <Select
                         items={modeItems}
                         value={field.value}
@@ -293,9 +317,45 @@ export function RequestRiskSection(props: RequestRiskSectionProps) {
                         </SelectContent>
                       </Select>
                       <FormDescription>
-                        {mode === 'observe'
-                          ? '只记录风险和并发超限，不返回 429。'
-                          : '中高风险或并发超限请求将返回 429。'}
+                        {riskMode === 'observe'
+                          ? '只记录满足强异常条件的测活风险，不返回 429。'
+                          : '仅当风险分达到阈值且命中高频或模型轮询等强异常因子时返回 429。'}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='request_risk_setting.concurrency_mode'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>并发限制模式</FormLabel>
+                      <Select
+                        items={concurrencyModeItems}
+                        value={field.value}
+                        onValueChange={(value) =>
+                          field.onChange(value as 'observe' | 'enforce')
+                        }
+                        disabled={!enabled}
+                      >
+                        <FormControl>
+                          <SelectTrigger className='w-full'>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent alignItemWithTrigger={false}>
+                          <SelectGroup>
+                            <SelectItem value='observe'>观察模式</SelectItem>
+                            <SelectItem value='enforce'>限制模式</SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        {concurrencyMode === 'observe'
+                          ? '只记录并发超限，不改变请求结果。'
+                          : '用户或 API 密钥在途请求超限时直接返回 429。'}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -455,7 +515,8 @@ export function RequestRiskSection(props: RequestRiskSectionProps) {
                         />
                       </FormControl>
                       <FormDescription>
-                        超限时不排队，拦截模式直接返回 429；0 表示不限制。
+                        超限时不排队，并发限制模式为“限制模式”时直接返回 429；0
+                        表示不限制。
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

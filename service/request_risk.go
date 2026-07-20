@@ -30,8 +30,6 @@ const (
 	requestRiskTextRuneLimit  = 1024
 	requestRiskPruneInterval  = 5 * time.Second
 	requestRiskLogCooldown    = 30 * time.Second
-	requestRiskFailureWindow  = 30 * time.Second
-	requestRiskFastRetryTTL   = 3 * time.Second
 	requestRiskModelSetLimit  = 8
 )
 
@@ -69,7 +67,6 @@ type RequestRiskMetrics struct {
 	IPRequestCount60s int64 `json:"ip_request_count_60s"`
 	RepeatCount60s    int64 `json:"repeat_count_60s"`
 	DistinctModels60s int64 `json:"distinct_models_60s"`
-	FailureCount30s   int64 `json:"failure_count_30s"`
 }
 
 type RequestRiskVerdict struct {
@@ -79,6 +76,7 @@ type RequestRiskVerdict struct {
 	MatchedKeywords []string
 	Metrics         RequestRiskMetrics
 	RetryAfter      time.Duration
+	Enforceable     bool
 	Blocked         bool
 	Observed        bool
 	ExistingBlock   bool
@@ -94,8 +92,6 @@ type requestRiskSnapshot struct {
 	IPCount60s       int64
 	RepeatCount60s   int64
 	DistinctModels60 int64
-	FailureCount30s  int64
-	FastFailureRetry bool
 }
 
 type requestRiskMemoryEntry struct {
@@ -148,6 +144,7 @@ func GetActiveRequestRiskBlockVerdict(ctx context.Context, input RequestRiskInpu
 		Score:         score,
 		Factors:       []string{"temporary_block"},
 		RetryAfter:    retryAfter,
+		Enforceable:   true,
 		Blocked:       true,
 		ExistingBlock: true,
 		Fingerprint:   fingerprint,
@@ -166,6 +163,10 @@ func EvaluateRequestRiskBehavior(ctx context.Context, input RequestRiskInput, se
 	verdict.ScopeKey = scopeKey
 
 	if verdict.Score < 3 {
+		return verdict
+	}
+	if !verdict.Enforceable {
+		verdict.Observed = true
 		return verdict
 	}
 	verdict.RetryAfter = proposedRequestRiskRetryAfter(input, verdict, settings)
@@ -287,39 +288,6 @@ func proposedRequestRiskRetryAfter(input RequestRiskInput, verdict RequestRiskVe
 	return retryAfter
 }
 
-func RecordRequestRiskFailure(ctx context.Context, input RequestRiskInput, fingerprint string) {
-	scope := requestRiskBehaviorScope(input)
-	if scope == "" {
-		return
-	}
-	now := time.Now()
-	failureKey := requestRiskWindowKey("failure", scope, now, int64(requestRiskFailureWindow.Seconds()))
-	lastFailureKey := requestRiskKey("last-failure", scope)
-
-	if common.RedisEnabled && common.RDB != nil {
-		pipe := common.RDB.Pipeline()
-		pipe.Incr(ctx, failureKey)
-		pipe.Expire(ctx, failureKey, requestRiskFailureWindow*2)
-		if fingerprint != "" {
-			pipe.Set(ctx, lastFailureKey, fingerprint, requestRiskFastRetryTTL)
-		}
-		if _, err := pipe.Exec(ctx); err == nil {
-			return
-		} else {
-			common.SysLog("request risk redis failure record failed: " + err.Error())
-		}
-	}
-
-	requestRiskMemory.Lock()
-	defer requestRiskMemory.Unlock()
-	pruneRequestRiskMemory(now)
-	memoryRequestRiskIncrement(failureKey, requestRiskFailureWindow*2, now)
-	if fingerprint != "" {
-		memoryRequestRiskSetValue(lastFailureKey, fingerprint, requestRiskFastRetryTTL, now)
-	}
-	trimRequestRiskMemory(now)
-}
-
 func AcquireRequestRiskLogSlot(ctx context.Context, scope string) bool {
 	return AcquireRequestGuardLogSlot(ctx, "risk", scope)
 }
@@ -357,11 +325,11 @@ func scoreRequestRisk(snapshot requestRiskSnapshot, normalizedText string) Reque
 		IPRequestCount60s: snapshot.IPCount60s,
 		RepeatCount60s:    snapshot.RepeatCount60s,
 		DistinctModels60s: snapshot.DistinctModels60,
-		FailureCount30s:   snapshot.FailureCount30s,
 	}
 
 	if verdict.Metrics.RequestCount10s >= 25 {
 		verdict.Score += 3
+		verdict.Enforceable = true
 		verdict.Factors = append(verdict.Factors, "burst_10s_high")
 	} else if verdict.Metrics.RequestCount10s >= 10 {
 		verdict.Score++
@@ -370,6 +338,7 @@ func scoreRequestRisk(snapshot requestRiskSnapshot, normalizedText string) Reque
 
 	if verdict.Metrics.RequestCount60s >= 120 {
 		verdict.Score += 3
+		verdict.Enforceable = true
 		verdict.Factors = append(verdict.Factors, "request_volume_60s_high")
 	} else if verdict.Metrics.RequestCount60s >= 60 {
 		verdict.Score++
@@ -378,6 +347,7 @@ func scoreRequestRisk(snapshot requestRiskSnapshot, normalizedText string) Reque
 
 	if snapshot.IPCount60s >= 360 {
 		verdict.Score += 3
+		verdict.Enforceable = true
 		verdict.Factors = append(verdict.Factors, "ip_volume_60s_high")
 	} else if snapshot.IPCount60s >= 180 {
 		verdict.Score++
@@ -400,23 +370,12 @@ func scoreRequestRisk(snapshot requestRiskSnapshot, normalizedText string) Reque
 
 	if snapshot.DistinctModels60 >= 8 {
 		verdict.Score += 3
+		verdict.Enforceable = true
 		verdict.Factors = append(verdict.Factors, "model_sweep_high")
 	} else if snapshot.DistinctModels60 >= 4 {
 		verdict.Score += 2
+		verdict.Enforceable = true
 		verdict.Factors = append(verdict.Factors, "model_sweep")
-	}
-
-	if snapshot.FailureCount30s >= 12 {
-		verdict.Score += 2
-		verdict.Factors = append(verdict.Factors, "failure_burst_high")
-	} else if snapshot.FailureCount30s >= 5 {
-		verdict.Score++
-		verdict.Factors = append(verdict.Factors, "failure_burst")
-	}
-
-	if snapshot.FastFailureRetry {
-		verdict.Score += 2
-		verdict.Factors = append(verdict.Factors, "fast_failure_retry")
 	}
 
 	if verdict.Score >= 5 {
@@ -482,12 +441,6 @@ func collectRedisRequestRiskSnapshot(ctx context.Context, input RequestRiskInput
 		)
 	}
 
-	var failureCount, lastFailure *redis.StringCmd
-	if behaviorScope != "" {
-		failureKey := requestRiskWindowKey("failure", behaviorScope, now, int64(requestRiskFailureWindow.Seconds()))
-		failureCount = pipe.Get(ctx, failureKey)
-		lastFailure = pipe.Get(ctx, requestRiskKey("last-failure", behaviorScope))
-	}
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 		return requestRiskSnapshot{}, err
 	}
@@ -509,10 +462,6 @@ func collectRedisRequestRiskSnapshot(ctx context.Context, input RequestRiskInput
 	}
 	if distinctModels != nil {
 		snapshot.DistinctModels60 = redisResultInt(distinctModels.Val())
-	}
-	if failureCount != nil {
-		snapshot.FailureCount30s = parseRedisInt(failureCount.Val())
-		snapshot.FastFailureRetry = fingerprint != "" && lastFailure.Val() == fingerprint
 	}
 	return snapshot, nil
 }
@@ -550,10 +499,6 @@ func collectMemoryRequestRiskSnapshot(input RequestRiskInput, fingerprint string
 			125*time.Second,
 			now,
 		)
-	}
-	if behaviorScope != "" {
-		snapshot.FailureCount30s = memoryRequestRiskCount(requestRiskWindowKey("failure", behaviorScope, now, int64(requestRiskFailureWindow.Seconds())), now)
-		snapshot.FastFailureRetry = fingerprint != "" && memoryRequestRiskValue(requestRiskKey("last-failure", behaviorScope), now) == fingerprint
 	}
 	trimRequestRiskMemory(now)
 	return snapshot

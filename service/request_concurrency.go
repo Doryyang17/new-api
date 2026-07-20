@@ -77,7 +77,7 @@ func AcquireRequestConcurrency(ctx context.Context, input RequestRiskInput, sett
 		return nil, verdict
 	}
 
-	enforce := settings.Mode == system_setting.RequestRiskModeEnforce
+	enforce := settings.EffectiveConcurrencyMode() == system_setting.RequestRiskModeEnforce
 	if common.RedisEnabled && common.RDB != nil {
 		lease, redisVerdict, err := acquireRedisRequestConcurrency(ctx, userKey, tokenKey, settings, enforce)
 		if err == nil {

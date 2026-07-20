@@ -85,6 +85,7 @@ func restoreRequestRiskSettings(t *testing.T, settings system_setting.RequestRis
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
 		"request_risk_setting.enabled":                 fmt.Sprintf("%t", settings.Enabled),
 		"request_risk_setting.mode":                    settings.Mode,
+		"request_risk_setting.concurrency_mode":        settings.ConcurrencyMode,
 		"request_risk_setting.log_matches":             fmt.Sprintf("%t", settings.LogMatches),
 		"request_risk_setting.medium_cooldown_seconds": fmt.Sprintf("%d", settings.MediumCooldownSeconds),
 		"request_risk_setting.token_block_seconds":     fmt.Sprintf("%d", settings.TokenBlockSeconds),
@@ -102,6 +103,7 @@ func TestUpdateRequestRiskOptionsPersistsCompleteSettings(t *testing.T) {
 		Updates: []requestRiskOptionUpdate{
 			{Key: "request_risk_setting.enabled", Value: "true"},
 			{Key: "request_risk_setting.mode", Value: system_setting.RequestRiskModeEnforce},
+			{Key: "request_risk_setting.concurrency_mode", Value: system_setting.RequestRiskModeObserve},
 			{Key: "request_risk_setting.log_matches", Value: "false"},
 			{Key: "request_risk_setting.medium_cooldown_seconds", Value: "12"},
 			{Key: "request_risk_setting.token_block_seconds", Value: "360"},
@@ -127,10 +129,11 @@ func TestUpdateRequestRiskOptionsPersistsCompleteSettings(t *testing.T) {
 
 	var options []model.Option
 	require.NoError(t, db.Where("key LIKE ?", "request_risk_setting.%").Find(&options).Error)
-	assert.Len(t, options, 10)
+	assert.Len(t, options, 11)
 	settings := system_setting.GetRequestRiskSettings()
 	assert.True(t, settings.Enabled)
 	assert.Equal(t, system_setting.RequestRiskModeEnforce, settings.Mode)
+	assert.Equal(t, system_setting.RequestRiskModeObserve, settings.ConcurrencyMode)
 	assert.False(t, settings.LogMatches)
 	assert.Equal(t, 12, settings.MediumCooldownSeconds)
 	assert.Equal(t, 360, settings.TokenBlockSeconds)

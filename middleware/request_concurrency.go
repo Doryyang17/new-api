@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -14,42 +13,27 @@ import (
 
 const requestConcurrencyRetryAfter = time.Second
 
-func RequestConcurrencyGuard() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		settings := system_setting.GetRequestRiskSettings()
-		if !settings.Enabled || (settings.UserConcurrencyLimit <= 0 && settings.TokenConcurrencyLimit <= 0) || !isRequestConcurrencyCandidate(c) {
-			c.Next()
-			return
-		}
-
-		group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-		if system_setting.RequestRiskGroupWhitelisted(group, settings) {
-			c.Next()
-			return
-		}
-
-		input := service.RequestRiskInput{
-			UserID:  c.GetInt("id"),
-			TokenID: c.GetInt("token_id"),
-		}
-		lease, verdict := service.AcquireRequestConcurrency(c.Request.Context(), input, settings)
-		if verdict.Exceeded && settings.LogMatches && service.AcquireRequestGuardLogSlot(c.Request.Context(), "concurrency", verdict.ScopeKey) {
-			recordRequestConcurrencyEvent(c, verdict, settings.Mode)
-		}
-		if !verdict.Allowed {
-			writeRequestProtectionResponse(
-				c,
-				requestConcurrencyRetryAfter,
-				system_setting.DefaultRequestConcurrencyMessage,
-				types.ErrorCodeRequestConcurrencyLimited,
-			)
-			return
-		}
-		defer service.ReleaseRequestConcurrency(lease)
-		stopHeartbeat := service.StartRequestConcurrencyLeaseHeartbeat(lease)
-		defer stopHeartbeat()
-		c.Next()
+func applyRequestConcurrencyProtection(c *gin.Context, settings system_setting.RequestRiskSettings) (*service.RequestConcurrencyLease, *RequestProtectionRejection) {
+	if (settings.UserConcurrencyLimit <= 0 && settings.TokenConcurrencyLimit <= 0) || !isRequestConcurrencyCandidate(c) {
+		return nil, nil
 	}
+
+	input := service.RequestRiskInput{
+		UserID:  c.GetInt("id"),
+		TokenID: c.GetInt("token_id"),
+	}
+	lease, verdict := service.AcquireRequestConcurrency(c.Request.Context(), input, settings)
+	if verdict.Exceeded && settings.LogMatches && service.AcquireRequestGuardLogSlot(c.Request.Context(), "concurrency", verdict.ScopeKey) {
+		recordRequestConcurrencyEvent(c, verdict, settings.EffectiveConcurrencyMode())
+	}
+	if !verdict.Allowed {
+		return nil, &RequestProtectionRejection{
+			RetryAfter: requestConcurrencyRetryAfter,
+			Message:    system_setting.DefaultRequestConcurrencyMessage,
+			ErrorCode:  types.ErrorCodeRequestConcurrencyLimited,
+		}
+	}
+	return lease, nil
 }
 
 func recordRequestConcurrencyEvent(c *gin.Context, verdict service.RequestConcurrencyVerdict, mode string) {
@@ -63,7 +47,10 @@ func recordRequestConcurrencyEvent(c *gin.Context, verdict service.RequestConcur
 		"token_in_flight":                 verdict.TokenCount,
 		"token_limit":                     verdict.TokenLimit,
 		"full_request_available":          false,
-		"full_request_unavailable_reason": "并发保护在读取请求体前命中",
+		"full_request_unavailable_reason": "并发保护在原生校验通过后命中，未重复记录请求体",
+	}
+	if common.IsClientIPTrustConfigured() {
+		adminInfo["client_ip"] = c.ClientIP()
 	}
 	other := map[string]interface{}{"admin_info": adminInfo}
 	content := "请求并发保护观察命中"

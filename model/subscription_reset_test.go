@@ -86,6 +86,43 @@ func TestAdminResetUserSubscriptionsByPlanResetsAllActiveMatchesAndAdvancesTime(
 	assert.EqualValues(t, 900, getSubscriptionResetSub(t, 9206).AmountUsed)
 }
 
+func TestCanPreConsumeUserSubscriptionTreatsDueResetAsAvailableWithoutMutation(t *testing.T) {
+	truncateTables(t)
+
+	now := GetDBTimestamp()
+	plan := &SubscriptionPlan{
+		Id:               9151,
+		Title:            "Preflight",
+		DurationUnit:     SubscriptionDurationMonth,
+		DurationValue:    1,
+		TotalAmount:      100,
+		QuotaResetPeriod: SubscriptionResetDaily,
+	}
+	seedSubscriptionResetPlan(t, plan)
+	subscription := &UserSubscription{
+		Id:            9251,
+		UserId:        151,
+		PlanId:        plan.Id,
+		AmountTotal:   100,
+		AmountUsed:    100,
+		StartTime:     now - 2*24*3600,
+		EndTime:       now + 30*24*3600,
+		Status:        "active",
+		LastResetTime: now - 2*24*3600,
+		NextResetTime: now - 24*3600,
+	}
+	seedSubscriptionResetSub(t, subscription)
+
+	available, err := CanPreConsumeUserSubscription(subscription.UserId, 50)
+
+	require.NoError(t, err)
+	assert.True(t, available)
+	stored := getSubscriptionResetSub(t, subscription.Id)
+	assert.Equal(t, int64(100), stored.AmountUsed)
+	assert.Equal(t, subscription.LastResetTime, stored.LastResetTime)
+	assert.Equal(t, subscription.NextResetTime, stored.NextResetTime)
+}
+
 func TestAdminResetUserSubscriptionsByPlanKeepsResetTimes(t *testing.T) {
 	truncateTables(t)
 
