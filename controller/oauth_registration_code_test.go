@@ -12,56 +12,12 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
-
-type testOAuthSession struct {
-	values map[interface{}]interface{}
-}
-
-func newTestOAuthSession() *testOAuthSession {
-	return &testOAuthSession{values: map[interface{}]interface{}{}}
-}
-
-func (s *testOAuthSession) ID() string {
-	return "test"
-}
-
-func (s *testOAuthSession) Get(key interface{}) interface{} {
-	return s.values[key]
-}
-
-func (s *testOAuthSession) Set(key interface{}, val interface{}) {
-	s.values[key] = val
-}
-
-func (s *testOAuthSession) Delete(key interface{}) {
-	delete(s.values, key)
-}
-
-func (s *testOAuthSession) Clear() {
-	s.values = map[interface{}]interface{}{}
-}
-
-func (s *testOAuthSession) AddFlash(value interface{}, vars ...string) {
-}
-
-func (s *testOAuthSession) Flashes(vars ...string) []interface{} {
-	return nil
-}
-
-func (s *testOAuthSession) Options(sessions.Options) {
-}
-
-func (s *testOAuthSession) Save() error {
-	return nil
-}
 
 type testOAuthProvider struct {
 	taken bool
@@ -128,7 +84,7 @@ func TestFindOrCreateOAuthUserRequiresRegistrationCodeForNewUser(t *testing.T) {
 		newOAuthRegistrationCodeTestContext(),
 		&testOAuthProvider{},
 		&oauth.OAuthUser{ProviderUserID: "new-user", Username: "new_user"},
-		newTestOAuthSession(),
+		"",
 	)
 
 	require.Nil(t, user)
@@ -143,7 +99,7 @@ func TestFindOrCreateOAuthUserAllowsExistingUserWithoutRegistrationCode(t *testi
 		newOAuthRegistrationCodeTestContext(),
 		&testOAuthProvider{taken: true},
 		&oauth.OAuthUser{ProviderUserID: "existing-user", Username: "existing"},
-		newTestOAuthSession(),
+		"",
 	)
 
 	require.NoError(t, err)
@@ -151,9 +107,11 @@ func TestFindOrCreateOAuthUserAllowsExistingUserWithoutRegistrationCode(t *testi
 	require.Equal(t, 42, user.Id)
 }
 
-func TestStoreOAuthPendingRegistrationKeepsOnlyTicketInSession(t *testing.T) {
-	session := newTestOAuthSession()
+func TestStoreOAuthPendingRegistrationReturnsOpaqueTicket(t *testing.T) {
 	c := newOAuthRegistrationCodeTestContext()
+	recorder := httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/oauth/test", nil)
 	provider := &testOAuthProvider{}
 	oauthUser := &oauth.OAuthUser{
 		ProviderUserID: "oauth-user-provider-id",
@@ -162,10 +120,12 @@ func TestStoreOAuthPendingRegistrationKeepsOnlyTicketInSession(t *testing.T) {
 		Email:          "oauth@example.test",
 	}
 
-	storeOAuthPendingRegistration(c, session, "test", provider, oauthUser)
+	storeOAuthPendingRegistration(c, "test", provider, oauthUser, "affiliate")
 
-	ticket, ok := session.Get(oauthPendingRegistrationSessionKey).(string)
-	require.True(t, ok)
+	var response oauthRegistrationRequiredResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	ticket := response.Data.Ticket
 	require.NotEmpty(t, ticket)
 	assert.NotContains(t, ticket, oauthUser.ProviderUserID)
 	assert.NotContains(t, ticket, oauthUser.Email)
@@ -173,10 +133,11 @@ func TestStoreOAuthPendingRegistrationKeepsOnlyTicketInSession(t *testing.T) {
 		deleteOAuthPendingRegistration(ticket)
 	})
 
-	pending, ok := loadOAuthPendingRegistration(session)
+	pending, ok := loadOAuthPendingRegistrationByTicket(ticket)
 	require.True(t, ok)
 	assert.Equal(t, oauthUser.ProviderUserID, pending.ProviderUserID)
 	assert.Equal(t, oauthUser.Email, pending.Email)
+	assert.Equal(t, "affiliate", pending.AffiliateCode)
 }
 
 type oauthRegistrationRequiredResponse struct {
@@ -206,7 +167,7 @@ func setupOAuthRegistrationControllerTestDB(t *testing.T) {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.RegistrationCode{}, &model.Log{}, &model.UserOAuthBinding{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.RegistrationCode{}, &model.Log{}, &model.UserOAuthBinding{}, &model.UserSession{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
@@ -224,9 +185,8 @@ func setupOAuthRegistrationControllerTestDB(t *testing.T) {
 func newOAuthRegistrationCompletionRouter(provider oauth.Provider, oauthUser *oauth.OAuthUser) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(sessions.Sessions("session", cookie.NewStore([]byte("oauth-registration-test"))))
 	router.GET("/seed", func(c *gin.Context) {
-		storeOAuthPendingRegistration(c, sessions.Default(c), "test", provider, oauthUser)
+		storeOAuthPendingRegistration(c, "test", provider, oauthUser, "")
 	})
 	router.POST("/api/oauth/:provider/complete-registration", CompleteOAuthRegistration)
 	return router
@@ -277,9 +237,6 @@ func TestCompleteOAuthRegistrationCreatesUserAndConsumesCode(t *testing.T) {
 		"/api/oauth/test/complete-registration",
 		bytes.NewReader(requestBody),
 	)
-	for _, sessionCookie := range seedRecorder.Result().Cookies() {
-		completeRequest.AddCookie(sessionCookie)
-	}
 	completeRecorder := httptest.NewRecorder()
 	router.ServeHTTP(completeRecorder, completeRequest)
 	require.Equal(t, http.StatusOK, completeRecorder.Code)
@@ -287,21 +244,23 @@ func TestCompleteOAuthRegistrationCreatesUserAndConsumesCode(t *testing.T) {
 	var completeResponse struct {
 		Success bool `json:"success"`
 		Data    struct {
-			Id       int    `json:"id"`
-			Username string `json:"username"`
+			User struct {
+				Id       int    `json:"id"`
+				Username string `json:"username"`
+			} `json:"user"`
 		} `json:"data"`
 	}
 	require.NoError(t, common.Unmarshal(completeRecorder.Body.Bytes(), &completeResponse))
 	require.True(t, completeResponse.Success)
-	require.NotZero(t, completeResponse.Data.Id)
-	assert.Equal(t, "oauth_new", completeResponse.Data.Username)
+	require.NotZero(t, completeResponse.Data.User.Id)
+	assert.Equal(t, "oauth_new", completeResponse.Data.User.Username)
 
 	var user model.User
-	require.NoError(t, model.DB.Where("id = ?", completeResponse.Data.Id).First(&user).Error)
+	require.NoError(t, model.DB.Where("id = ?", completeResponse.Data.User.Id).First(&user).Error)
 	assert.Equal(t, "oauth-user-1", user.GitHubId)
 
 	var usedCode model.RegistrationCode
 	require.NoError(t, model.DB.Where("code = ?", code).First(&usedCode).Error)
 	assert.Equal(t, common.RegistrationCodeStatusUsed, usedCode.Status)
-	assert.Equal(t, completeResponse.Data.Id, usedCode.UsedUserId)
+	assert.Equal(t, completeResponse.Data.User.Id, usedCode.UsedUserId)
 }

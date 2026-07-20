@@ -13,13 +13,11 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 )
 
 const (
-	oauthPendingRegistrationSessionKey  = "oauth_pending_registration"
 	oauthRegistrationCodeRequiredAction = "registration_code_required"
 	oauthPendingRegistrationTTL         = 10 * time.Minute
 	oauthPendingRegistrationExpiredMsg  = "OAuth 注册状态已过期，请重新使用第三方账号登录"
@@ -35,6 +33,7 @@ type oauthPendingRegistration struct {
 	Username       string `json:"username,omitempty"`
 	DisplayName    string `json:"display_name,omitempty"`
 	Email          string `json:"email,omitempty"`
+	AffiliateCode  string `json:"affiliate_code,omitempty"`
 	ExpiresAt      int64  `json:"expires_at"`
 }
 
@@ -129,10 +128,10 @@ func deleteOAuthPendingRegistration(ticket string) {
 
 func storeOAuthPendingRegistration(
 	c *gin.Context,
-	session sessions.Session,
 	providerName string,
 	provider oauth.Provider,
 	oauthUser *oauth.OAuthUser,
+	affiliateCode string,
 ) {
 	pending := oauthPendingRegistration{
 		Ticket:         common.GetRandomString(32),
@@ -142,6 +141,7 @@ func storeOAuthPendingRegistration(
 		Username:       oauthUser.Username,
 		DisplayName:    oauthUser.DisplayName,
 		Email:          oauthUser.Email,
+		AffiliateCode:  strings.TrimSpace(affiliateCode),
 		ExpiresAt:      time.Now().Add(oauthPendingRegistrationTTL).Unix(),
 	}
 	if legacyID, ok := oauthUser.Extra["legacy_id"].(string); ok {
@@ -149,12 +149,6 @@ func storeOAuthPendingRegistration(
 	}
 
 	if err := saveOAuthPendingRegistration(pending); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	session.Set(oauthPendingRegistrationSessionKey, pending.Ticket)
-	if err := session.Save(); err != nil {
-		deleteOAuthPendingRegistration(pending.Ticket)
 		common.ApiError(c, err)
 		return
 	}
@@ -173,21 +167,6 @@ func storeOAuthPendingRegistration(
 		},
 	})
 }
-
-func loadOAuthPendingRegistration(session sessions.Session) (*oauthPendingRegistration, bool) {
-	ticket, ok := session.Get(oauthPendingRegistrationSessionKey).(string)
-	if !ok || strings.TrimSpace(ticket) == "" {
-		return nil, false
-	}
-	return loadOAuthPendingRegistrationByTicket(ticket)
-}
-
-func clearOAuthPendingRegistration(session sessions.Session) {
-	ticket, _ := session.Get(oauthPendingRegistrationSessionKey).(string)
-	deleteOAuthPendingRegistration(ticket)
-	session.Delete(oauthPendingRegistrationSessionKey)
-}
-
 func (pending *oauthPendingRegistration) oauthUser() *oauth.OAuthUser {
 	extra := map[string]any{}
 	if pending.LegacyUserID != "" {
@@ -224,16 +203,14 @@ func CompleteOAuthRegistration(c *gin.Context) {
 	}
 	request.Ticket = strings.TrimSpace(request.Ticket)
 
-	session := sessions.Default(c)
-	pending, ok := loadOAuthPendingRegistration(session)
+	pending, ok := loadOAuthPendingRegistrationByTicket(request.Ticket)
 	if !ok ||
 		request.Ticket == "" ||
 		pending.Ticket != request.Ticket ||
 		pending.Provider != providerName ||
 		pending.ProviderUserID == "" ||
 		pending.ExpiresAt < time.Now().Unix() {
-		clearOAuthPendingRegistration(session)
-		_ = session.Save()
+		deleteOAuthPendingRegistration(request.Ticket)
 		common.ApiErrorMsg(c, oauthPendingRegistrationExpiredMsg)
 		return
 	}
@@ -244,10 +221,9 @@ func CompleteOAuthRegistration(c *gin.Context) {
 	}
 
 	user, err := findOrCreateOAuthUserWithRegistrationCode(
-		c,
 		provider,
 		pending.oauthUser(),
-		session,
+		pending.AffiliateCode,
 		registrationCode,
 		registrationRiskKeys,
 	)
@@ -274,6 +250,6 @@ func CompleteOAuthRegistration(c *gin.Context) {
 		return
 	}
 
-	clearOAuthPendingRegistration(session)
+	deleteOAuthPendingRegistration(pending.Ticket)
 	setupLogin(user, c)
 }

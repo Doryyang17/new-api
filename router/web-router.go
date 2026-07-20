@@ -3,9 +3,7 @@ package router
 import (
 	"bytes"
 	"embed"
-	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -17,12 +15,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ThemeAssets holds the embedded frontend assets for both themes.
-type ThemeAssets struct {
-	DefaultBuildFS   embed.FS
-	DefaultIndexPage []byte
-	ClassicBuildFS   embed.FS
-	ClassicIndexPage []byte
+// WebAssets holds the embedded dashboard frontend assets.
+type WebAssets struct {
+	BuildFS   embed.FS
+	IndexPage []byte
 }
 
 type frontendAvailabilityStatus struct {
@@ -36,35 +32,13 @@ type frontendAvailabilityStatus struct {
 	RetryAfterSeconds int    `json:"retry_after_seconds"`
 }
 
-type indexFallbackFileSystem struct {
-	inner static.ServeFileSystem
-}
-
-func (i *indexFallbackFileSystem) Exists(prefix string, path string) bool {
-	if isIndexPagePath(path) {
-		return false
-	}
-	return i.inner.Exists(prefix, path)
-}
-
-func (i *indexFallbackFileSystem) Open(name string) (http.File, error) {
-	if isIndexPagePath(name) {
-		return nil, os.ErrNotExist
-	}
-	return i.inner.Open(name)
-}
-
-func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
-	defaultFS := common.EmbedFolder(assets.DefaultBuildFS, "web/default/dist")
-	classicFS := common.EmbedFolder(assets.ClassicBuildFS, "web/classic/dist")
-	themeFS := &indexFallbackFileSystem{
-		inner: common.NewThemeAwareFS(defaultFS, classicFS),
-	}
+func SetWebRouter(router *gin.Engine, assets WebAssets) {
+	frontendFS := common.EmbedFolder(assets.BuildFS, "web/dist")
 
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.GlobalWebRateLimit())
 	router.Use(middleware.Cache())
-	router.Use(static.Serve("/", themeFS))
+	router.Use(static.Serve("/", frontendFS))
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
 		availabilityStatus := system_setting.GetAvailabilityStatus()
@@ -85,13 +59,7 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 		} else {
 			c.Header("Cache-Control", "no-cache")
 		}
-		var indexPage []byte
-		if common.GetTheme() == "classic" {
-			indexPage = assets.ClassicIndexPage
-		} else {
-			indexPage = assets.DefaultIndexPage
-		}
-		c.Data(http.StatusOK, "text/html; charset=utf-8", injectAvailabilityStatus(indexPage, availabilityStatus))
+		c.Data(http.StatusOK, "text/html; charset=utf-8", injectAvailabilityStatus(assets.IndexPage, availabilityStatus))
 	})
 }
 
@@ -106,7 +74,7 @@ func injectAvailabilityStatus(page []byte, status system_setting.AvailabilitySta
 		UnavailableEnd:    status.UnavailableEnd,
 		RetryAfterSeconds: status.RetryAfterSeconds,
 	}
-	encoded, err := json.Marshal(payload)
+	encoded, err := common.Marshal(payload)
 	if err != nil {
 		return page
 	}

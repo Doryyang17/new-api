@@ -10,12 +10,10 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
 const (
-	oauthRegistrationCodeSessionKey      = "oauth_registration_code"
 	registrationCodeInvalidMessage       = "注册码无效或已被使用"
 	registrationRiskBlockedMessage       = "注册尝试过多，请稍后再试"
 	oauthRegistrationCodeRequiredMessage = "请填写注册码完成账号创建"
@@ -61,27 +59,4 @@ func validateRegistrationCodeForNewUser(c *gin.Context, rawCode string) (string,
 	}
 
 	return code, riskKeys, true
-}
-
-func prepareOAuthRegistrationCodeForNewUser(c *gin.Context, session sessions.Session) (string, []string, error) {
-	riskKeys := service.BuildRegistrationRiskKeys(c.ClientIP(), c.Request.Header)
-	if !common.RegistrationCodeRegisterEnabled {
-		return "", riskKeys, nil
-	}
-
-	blocked, retryAfter := service.IsRegistrationRiskBlocked(riskKeys)
-	if blocked {
-		return "", riskKeys, &OAuthRegistrationRiskBlockedError{RetryAfter: retryAfter}
-	}
-
-	rawCode, _ := session.Get(oauthRegistrationCodeSessionKey).(string)
-	code := model.NormalizeRegistrationCode(rawCode)
-	if code == "" {
-		return "", riskKeys, &OAuthRegistrationCodeRequiredError{}
-	}
-	if !model.IsRegistrationCodeFormatValid(code) {
-		service.RecordRegistrationCodeFailure(riskKeys)
-		return "", riskKeys, model.ErrRegistrationCodeInvalid
-	}
-	return code, riskKeys, nil
 }

@@ -35,10 +35,8 @@ types/         — Type definitions (relay formats, file sources, errors)
 i18n/          — Backend internationalization (go-i18n, en/zh)
 oauth/         — OAuth provider implementations
 pkg/           — Internal packages (cachex, ionet)
-web/             — Frontend themes container
- web/default/   — Default frontend (React 19, Rsbuild, Base UI, Tailwind)
-  web/classic/   — Classic frontend (React 18, Vite, Semi Design)
- web/default/src/i18n/ — Default frontend Chinese text compatibility layer
+web/           — Frontend (React 19, Rsbuild, Base UI, Tailwind)
+  src/i18n/    — Frontend Chinese text compatibility layer
 ```
 
 ## Internationalization (i18n)
@@ -49,11 +47,11 @@ web/             — Frontend themes container
 - The only maintained backend locale file is `i18n/locales/zh-CN.yaml`.
 - Do not add or maintain backend en/zh-TW locale files or Accept-Language based branching unless the user explicitly asks for multi-language support again.
 
-### Frontend (`web/default/src/i18n/`)
-- Default frontend is Chinese-only for this fork.
+### Frontend (`web/src/i18n/`)
+- The frontend is Chinese-only for this fork.
 - Existing `i18next` / `react-i18next` usage is retained only as a compatibility layer for old `t()` calls.
-- The only maintained frontend locale file is `web/default/src/i18n/locales/zh.json`.
-- Do not add or maintain en/fr/ru/ja/vi locale files, language switching UI, browser language detection, or i18n sync workflows for `web/default`.
+- The only maintained frontend locale file is `web/src/i18n/locales/zh.json`.
+- Do not add or maintain en/fr/ru/ja/vi locale files, language switching UI, browser language detection, or i18n sync workflows for `web/`.
 
 ## Rules
 
@@ -127,13 +125,13 @@ Do NOT directly import or call `encoding/json` in business code. `json.RawMessag
 
 ### Frontend Rules
 
-- Use `bun` as the preferred package manager and script runner for the frontend (`web/default/`):
+- Use `bun` as the preferred package manager and script runner for the frontend (`web/`):
   - `bun install` for dependency installation
   - `bun run dev` for development server
   - `bun run build` for production build
-- Frontend UI text in `web/default` defaults to Chinese. New user-facing copy may be written directly in Chinese.
+- Frontend UI text in `web/` defaults to Chinese. New user-facing copy may be written directly in Chinese.
 - Existing `useTranslation()` / `t()` calls may remain for compatibility, but new work should not introduce multi-language maintenance unless the user explicitly asks for it.
-- Follow `web/default/AGENTS.md` for detailed frontend conventions, including TypeScript, component structure, styling, accessibility, testing, and build checks.
+- Follow `web/AGENTS.md` for detailed frontend conventions, including TypeScript, component structure, styling, accessibility, testing, and build checks.
 
 ### Project Governance
 
