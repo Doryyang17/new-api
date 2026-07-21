@@ -48,6 +48,7 @@ func TestNormalizeQuotaGrantFiltersBuildsIntersectionAndBalanceBoundaries(t *tes
 		Statuses:      []int{common.UserStatusEnabled},
 		BalanceMode:   "lt",
 		BalanceAmount: "10",
+		RechargeMode:  "recharged",
 		UsageMode:     "used",
 		UsagePeriod:   "7d",
 	}, now)
@@ -55,10 +56,18 @@ func TestNormalizeQuotaGrantFiltersBuildsIntersectionAndBalanceBoundaries(t *tes
 	require.NotNil(t, filters.MaxQuota)
 	assert.Equal(t, 1000, *filters.MaxQuota)
 	assert.False(t, filters.MaxQuotaInclusive)
+	assert.Equal(t, "recharged", filters.RechargeMode)
 	assert.Equal(t, "used", filters.UsageMode)
 	assert.Equal(t, now.Add(-7*24*time.Hour).Unix(), filters.UsageStartAt)
 	assert.Contains(t, filterJson, `"balance_mode":"lt"`)
-	assert.Equal(t, "已启用；普通用户；余额 < $10.00；近7天有模型消耗", summary)
+	assert.Equal(t, "已启用；普通用户；余额 < $10.00；已充值；近7天有模型消耗", summary)
+}
+
+func TestNormalizeQuotaGrantFiltersRejectsInvalidRechargeMode(t *testing.T) {
+	_, _, _, err := normalizeQuotaGrantFilters(quotaGrantFilterRequest{
+		RechargeMode: "pending",
+	}, time.Now())
+	assert.ErrorContains(t, err, "不支持的充值情况筛选")
 }
 
 func TestNormalizeQuotaGrantFiltersUsesBeijingYesterdayWindow(t *testing.T) {

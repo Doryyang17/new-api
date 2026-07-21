@@ -108,6 +108,7 @@ const defaultFilters: QuotaGrantFilters = {
   balance_mode: 'any',
   balance_amount: '',
   balance_max: '',
+  recharge_mode: 'any',
   usage_mode: 'any',
   usage_period: '7d',
 }
@@ -140,6 +141,9 @@ function quotaGrantFilterSummary(filters: QuotaGrantFilters) {
   }
   if (balanceLabels[filters.balance_mode]) {
     parts.push(balanceLabels[filters.balance_mode])
+  }
+  if (filters.recharge_mode !== 'any') {
+    parts.push(filters.recharge_mode === 'recharged' ? '已充值' : '未充值')
   }
   if (filters.usage_mode !== 'any') {
     const period =
@@ -449,6 +453,28 @@ export function QuotaGrantSection() {
                     />
                   )}
                 </div>
+              </div>
+              <div className='grid gap-1.5 sm:grid-cols-[88px_1fr] sm:items-center'>
+                <span className='text-sm font-medium'>充值情况</span>
+                <Select
+                  value={draftFilters.recharge_mode}
+                  onValueChange={(value) => {
+                    if (!value) return
+                    setDraftFilters((current) => ({
+                      ...current,
+                      recharge_mode: value,
+                    }))
+                  }}
+                >
+                  <SelectTrigger className='w-full'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='any'>不限充值情况</SelectItem>
+                    <SelectItem value='recharged'>已充值用户</SelectItem>
+                    <SelectItem value='unrecharged'>未充值用户</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className='grid gap-1.5 sm:grid-cols-[88px_1fr] sm:items-center'>
                 <span className='text-sm font-medium'>使用情况</span>

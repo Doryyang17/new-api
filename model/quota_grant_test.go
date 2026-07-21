@@ -280,6 +280,36 @@ func TestListQuotaGrantTargetsExcludesRootAndDeletedUsers(t *testing.T) {
 	assert.Equal(t, []int{23, 22}, []int{targets[0].Id, targets[1].Id})
 }
 
+func TestListQuotaGrantTargetsFiltersBySuccessfulWalletRecharge(t *testing.T) {
+	truncateTables(t)
+	users := []*User{
+		{Id: 25, Username: "grant-recharged", Password: "password123", AffCode: "grant-recharged", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
+		{Id: 26, Username: "grant-pending-recharge", Password: "password123", AffCode: "grant-pending-recharge", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
+		{Id: 27, Username: "grant-unrecharged", Password: "password123", AffCode: "grant-unrecharged", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
+		{Id: 28, Username: "grant-subscription-only", Password: "password123", AffCode: "grant-subscription-only", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
+	}
+	require.NoError(t, DB.CreateInBatches(&users, 20).Error)
+	require.NoError(t, DB.CreateInBatches([]*TopUp{
+		{UserId: 25, TradeNo: "grant-recharged-success", Status: common.TopUpStatusSuccess, CreditedQuota: 100},
+		{UserId: 26, TradeNo: "grant-recharged-pending", Status: common.TopUpStatusPending, CreditedQuota: 100},
+		{UserId: 28, TradeNo: "grant-subscription-success", Status: common.TopUpStatusSuccess, CreditedQuota: 0},
+	}, 20).Error)
+
+	baseFilters := QuotaGrantTargetFilters{
+		Roles:    []int{common.RoleCommonUser},
+		Statuses: []int{common.UserStatusEnabled},
+	}
+	baseFilters.RechargeMode = "recharged"
+	ids, err := ListQuotaGrantTargetIds(baseFilters)
+	require.NoError(t, err)
+	assert.Equal(t, []int{25}, ids)
+
+	baseFilters.RechargeMode = "unrecharged"
+	ids, err = ListQuotaGrantTargetIds(baseFilters)
+	require.NoError(t, err)
+	assert.Equal(t, []int{28, 27, 26}, ids)
+}
+
 func TestListQuotaGrantTargetsAppliesBalanceUsageAndStatusIntersection(t *testing.T) {
 	truncateTables(t)
 	now := time.Now().Unix()

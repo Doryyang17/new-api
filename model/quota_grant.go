@@ -63,6 +63,7 @@ type QuotaGrantTargetFilters struct {
 	MinQuotaInclusive bool
 	MaxQuota          *int
 	MaxQuotaInclusive bool
+	RechargeMode      string
 	UsageMode         string
 	UsageStartAt      int64
 	UsageEndAt        int64
@@ -173,6 +174,13 @@ func quotaGrantTargetQuery(tx *gorm.DB, filters QuotaGrantTargetFilters) (*gorm.
 			operator = "<="
 		}
 		query = query.Where("quota "+operator+" ?", *filters.MaxQuota)
+	}
+	if filters.RechargeMode != "" {
+		condition := "EXISTS (SELECT 1 FROM top_ups WHERE top_ups.user_id = users.id AND top_ups.status = ? AND top_ups.credited_quota > 0)"
+		if filters.RechargeMode == "unrecharged" {
+			condition = "NOT " + condition
+		}
+		query = query.Where(condition, common.TopUpStatusSuccess)
 	}
 	if filters.UsageMode != "" {
 		if LOG_DB != DB {

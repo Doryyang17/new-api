@@ -34,6 +34,7 @@ type quotaGrantFilterRequest struct {
 	BalanceMode   string `json:"balance_mode"`
 	BalanceAmount string `json:"balance_amount"`
 	BalanceMax    string `json:"balance_max"`
+	RechargeMode  string `json:"recharge_mode"`
 	UsageMode     string `json:"usage_mode"`
 	UsagePeriod   string `json:"usage_period"`
 }
@@ -223,6 +224,7 @@ func quotaGrantFiltersFromQuery(c *gin.Context, now time.Time) (model.QuotaGrant
 		BalanceMode:   c.Query("balance_mode"),
 		BalanceAmount: c.Query("balance_amount"),
 		BalanceMax:    c.Query("balance_max"),
+		RechargeMode:  c.Query("recharge_mode"),
 		UsageMode:     c.Query("usage_mode"),
 		UsagePeriod:   c.Query("usage_period"),
 	}, now)
@@ -249,7 +251,7 @@ func normalizeQuotaGrantFilters(request quotaGrantFilterRequest, now time.Time) 
 	request.Roles = roles
 	request.Statuses = statuses
 	filters := model.QuotaGrantTargetFilters{Keyword: request.Keyword, Roles: roles, Statuses: statuses}
-	summary := make([]string, 0, 5)
+	summary := make([]string, 0, 6)
 	if len(statuses) == 2 {
 		summary = append(summary, "全部状态")
 	} else if statuses[0] == common.UserStatusEnabled {
@@ -271,6 +273,14 @@ func normalizeQuotaGrantFilters(request quotaGrantFilterRequest, now time.Time) 
 	}
 	if balanceSummary != "" {
 		summary = append(summary, balanceSummary)
+	}
+
+	rechargeSummary, err := applyQuotaGrantRechargeFilter(&filters, request)
+	if err != nil {
+		return model.QuotaGrantTargetFilters{}, "", "", err
+	}
+	if rechargeSummary != "" {
+		summary = append(summary, rechargeSummary)
 	}
 
 	usageSummary, err := applyQuotaGrantUsageFilter(&filters, request, now)
@@ -351,6 +361,21 @@ func applyQuotaGrantBalanceFilter(filters *model.QuotaGrantTargetFilters, reques
 	default:
 		return "", errors.New("不支持的余额筛选条件")
 	}
+}
+
+func applyQuotaGrantRechargeFilter(filters *model.QuotaGrantTargetFilters, request quotaGrantFilterRequest) (string, error) {
+	mode := strings.TrimSpace(request.RechargeMode)
+	if mode == "" || mode == "any" {
+		return "", nil
+	}
+	if mode != "recharged" && mode != "unrecharged" {
+		return "", errors.New("不支持的充值情况筛选")
+	}
+	filters.RechargeMode = mode
+	if mode == "recharged" {
+		return "已充值", nil
+	}
+	return "未充值", nil
 }
 
 func applyQuotaGrantUsageFilter(filters *model.QuotaGrantTargetFilters, request quotaGrantFilterRequest, now time.Time) (string, error) {
