@@ -87,6 +87,48 @@ func TestGrantUserQuotaBatchIsAtomicVisibleAndIdempotent(t *testing.T) {
 	assert.ErrorIs(t, err, ErrQuotaGrantIdempotencyConflict)
 }
 
+func TestGrantUserQuotaBatchAcceptsLegacyBatchRetryAfterFilterMigration(t *testing.T) {
+	truncateTables(t)
+	operator := &User{Id: 61, Username: "quota-legacy-root", Password: "password123", AffCode: "quota-legacy-root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}
+	target := &User{Id: 62, Username: "quota-legacy-target", Password: "password123", AffCode: "quota-legacy-target", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 500}
+	require.NoError(t, DB.Create(operator).Error)
+	require.NoError(t, DB.Create(target).Error)
+
+	requestId := uuid.NewString()
+	targetIds := []int{target.Id}
+	require.NoError(t, DB.Create(&QuotaGrantBatch{
+		RequestId:      requestId,
+		OperatorUserId: operator.Id,
+		Quota:          100,
+		AmountUsd:      "1.00",
+		Reason:         "旧批次重试",
+		TargetCount:    1,
+		TargetHash:     quotaGrantTargetHash(targetIds),
+	}).Error)
+
+	result, err := GrantUserQuotaBatch(QuotaGrantBatchParams{
+		RequestId:      requestId,
+		OperatorUserId: operator.Id,
+		OperatorName:   operator.Username,
+		TargetUserIds:  targetIds,
+		Quota:          100,
+		AmountUsd:      "1.00",
+		Reason:         "旧批次重试",
+		FilterJson:     `{"statuses":[1]}`,
+		FilterSummary:  "已启用；普通用户",
+		Filters: QuotaGrantTargetFilters{
+			Roles:    []int{common.RoleCommonUser},
+			Statuses: []int{common.UserStatusEnabled},
+		},
+	})
+	require.NoError(t, err)
+	assert.True(t, result.AlreadyProcessed)
+
+	var reloaded User
+	require.NoError(t, DB.First(&reloaded, target.Id).Error)
+	assert.Equal(t, 500, reloaded.Quota)
+}
+
 func TestGrantUserQuotaBatchWritesLogsAcrossBatches(t *testing.T) {
 	truncateTables(t)
 	operator := &User{Id: 10001, Username: "quota-batch-root", Password: "password123", AffCode: "batch-root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}
@@ -223,14 +265,147 @@ func TestListQuotaGrantTargetsExcludesRootAndDeletedUsers(t *testing.T) {
 	require.NoError(t, DB.Delete(users[0]).Error)
 
 	targets, total, err := ListQuotaGrantTargets(
-		"",
-		[]int{common.RoleCommonUser, common.RoleAdminUser},
-		[]int{common.UserStatusEnabled, common.UserStatusDisabled},
+		QuotaGrantTargetFilters{
+			Roles:    []int{common.RoleCommonUser, common.RoleAdminUser},
+			Statuses: []int{common.UserStatusEnabled, common.UserStatusDisabled},
+		},
 		0,
 		100,
+		time.Now().Add(-7*24*time.Hour).Unix(),
+		time.Now().Add(-30*24*time.Hour).Unix(),
 	)
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, total)
 	require.Len(t, targets, 2)
 	assert.Equal(t, []int{23, 22}, []int{targets[0].Id, targets[1].Id})
+}
+
+func TestListQuotaGrantTargetsAppliesBalanceUsageAndStatusIntersection(t *testing.T) {
+	truncateTables(t)
+	now := time.Now().Unix()
+	users := []*User{
+		{Id: 31, Username: "grant-negative", Password: "password123", AffCode: "grant-negative", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: -100},
+		{Id: 32, Username: "grant-zero", Password: "password123", AffCode: "grant-zero", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 0},
+		{Id: 33, Username: "grant-nine", Password: "password123", AffCode: "grant-nine", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 999},
+		{Id: 34, Username: "grant-ten", Password: "password123", AffCode: "grant-ten", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 1000},
+		{Id: 35, Username: "grant-ten-one", Password: "password123", AffCode: "grant-ten-one", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 1001},
+		{Id: 36, Username: "grant-disabled-nine", Password: "password123", AffCode: "grant-disabled-nine", Role: common.RoleCommonUser, Status: common.UserStatusDisabled, Quota: 999},
+	}
+	require.NoError(t, DB.CreateInBatches(&users, 20).Error)
+	require.NoError(t, LOG_DB.CreateInBatches([]*Log{
+		{UserId: 33, Username: users[2].Username, CreatedAt: now - 2*24*60*60, Type: LogTypeConsume, Quota: 120},
+		{UserId: 33, Username: users[2].Username, CreatedAt: now - 8*24*60*60, Type: LogTypeConsume, Quota: 500},
+		{UserId: 34, Username: users[3].Username, CreatedAt: now - 24*60*60, Type: LogTypeConsume, Quota: 240},
+		{UserId: 36, Username: users[5].Username, CreatedAt: now - 24*60*60, Type: LogTypeConsume, Quota: 360},
+	}, 20).Error)
+
+	maximum := 1000
+	filters := QuotaGrantTargetFilters{
+		Roles:        []int{common.RoleCommonUser},
+		Statuses:     []int{common.UserStatusEnabled},
+		MaxQuota:     &maximum,
+		UsageMode:    "used",
+		UsageStartAt: now - 7*24*60*60,
+	}
+	targets, total, err := ListQuotaGrantTargets(filters, 0, 20, now-7*24*60*60, now-30*24*60*60)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, targets, 1)
+	assert.Equal(t, 33, targets[0].Id)
+	assert.Equal(t, now-2*24*60*60, targets[0].LastUsedAt)
+	assert.EqualValues(t, 120, targets[0].UsedQuota7d)
+
+	ids, err := ListQuotaGrantTargetIds(filters)
+	require.NoError(t, err)
+	assert.Equal(t, []int{33}, ids)
+}
+
+func TestListQuotaGrantTargetsSupportsExactBalanceBoundariesAndNoUsage(t *testing.T) {
+	truncateTables(t)
+	now := time.Now().Unix()
+	users := []*User{
+		{Id: 41, Username: "grant-boundary-negative", Password: "password123", AffCode: "grant-boundary-negative", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: -1},
+		{Id: 42, Username: "grant-boundary-zero", Password: "password123", AffCode: "grant-boundary-zero", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 0},
+		{Id: 43, Username: "grant-boundary-nine", Password: "password123", AffCode: "grant-boundary-nine", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 999},
+		{Id: 44, Username: "grant-boundary-ten", Password: "password123", AffCode: "grant-boundary-ten", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 1000},
+		{Id: 45, Username: "grant-boundary-ten-one", Password: "password123", AffCode: "grant-boundary-ten-one", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 1001},
+	}
+	require.NoError(t, DB.CreateInBatches(&users, 20).Error)
+	require.NoError(t, LOG_DB.Create(&Log{UserId: 43, Username: users[2].Username, CreatedAt: now - 3*24*60*60, Type: LogTypeConsume, Quota: 100}).Error)
+
+	zero := 0
+	targets, total, err := ListQuotaGrantTargets(QuotaGrantTargetFilters{
+		Roles:             []int{common.RoleCommonUser},
+		Statuses:          []int{common.UserStatusEnabled},
+		MinQuota:          &zero,
+		MaxQuota:          &zero,
+		MinQuotaInclusive: true,
+		MaxQuotaInclusive: true,
+		UsageMode:         "unused",
+		UsageStartAt:      now - 7*24*60*60,
+	}, 0, 20, now-7*24*60*60, now-30*24*60*60)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, targets, 1)
+	assert.Equal(t, 42, targets[0].Id)
+
+	minimum, maximum := 999, 1000
+	targets, total, err = ListQuotaGrantTargets(QuotaGrantTargetFilters{
+		Roles:             []int{common.RoleCommonUser},
+		Statuses:          []int{common.UserStatusEnabled},
+		MinQuota:          &minimum,
+		MaxQuota:          &maximum,
+		MinQuotaInclusive: true,
+		MaxQuotaInclusive: true,
+	}, 0, 20, now-7*24*60*60, now-30*24*60*60)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
+	assert.Equal(t, []int{44, 43}, []int{targets[0].Id, targets[1].Id})
+}
+
+func TestListQuotaGrantTargetsLimitsRecentUsageStatisticsToThirtyDays(t *testing.T) {
+	truncateTables(t)
+	now := time.Now().Unix()
+	target := &User{Id: 46, Username: "grant-old-usage", Password: "password123", AffCode: "grant-old-usage", Role: common.RoleCommonUser, Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Create(target).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId: target.Id, Username: target.Username, CreatedAt: now - 31*24*60*60, Type: LogTypeConsume, Quota: 100,
+	}).Error)
+
+	targets, total, err := ListQuotaGrantTargets(QuotaGrantTargetFilters{
+		Roles: []int{common.RoleCommonUser}, Statuses: []int{common.UserStatusEnabled},
+	}, 0, 20, now-7*24*60*60, now-30*24*60*60)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, targets, 1)
+	assert.Zero(t, targets[0].LastUsedAt)
+	assert.Zero(t, targets[0].UsedQuota7d)
+}
+
+func TestGrantUserQuotaBatchRejectsTargetsThatNoLongerMatchFilters(t *testing.T) {
+	truncateTables(t)
+	operator := &User{Id: 51, Username: "grant-filter-root", Password: "password123", AffCode: "grant-filter-root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}
+	target := &User{Id: 52, Username: "grant-filter-target", Password: "password123", AffCode: "grant-filter-target", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 999}
+	require.NoError(t, DB.Create(operator).Error)
+	require.NoError(t, DB.Create(target).Error)
+
+	maximum := 1000
+	require.NoError(t, DB.Model(target).Update("quota", 1000).Error)
+	_, err := GrantUserQuotaBatch(QuotaGrantBatchParams{
+		RequestId:      uuid.NewString(),
+		OperatorUserId: operator.Id,
+		OperatorName:   operator.Username,
+		TargetUserIds:  []int{target.Id},
+		Quota:          100,
+		AmountUsd:      "0.01",
+		Reason:         "筛选复核测试",
+		FilterJson:     `{"balance_mode":"lt","balance_amount":"10"}`,
+		FilterSummary:  "已启用；余额 < $10",
+		Filters: QuotaGrantTargetFilters{
+			Roles:    []int{common.RoleCommonUser},
+			Statuses: []int{common.UserStatusEnabled},
+			MaxQuota: &maximum,
+		},
+	})
+	assert.ErrorContains(t, err, "不再符合当前筛选条件")
 }

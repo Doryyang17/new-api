@@ -24,7 +24,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import { Gift, Loader2, Search, Users } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import * as z from 'zod'
@@ -51,6 +51,13 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -60,9 +67,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { USER_ROLE, USER_STATUS } from '@/features/users/constants'
-import { useDebounce } from '@/hooks'
-import { formatQuota } from '@/lib/format'
-import { cn } from '@/lib/utils'
+import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import { SettingsSection } from '../components/settings-section'
 import {
@@ -92,81 +97,68 @@ type QuotaGrantFormValues = z.infer<typeof quotaGrantFormSchema>
 type PendingQuotaGrant = QuotaGrantFormValues & {
   requestId: string
   userIds: number[]
+  filters: QuotaGrantFilters
+  filterSummary: string
 }
 
-const roleOptions = [
-  {
-    value: USER_ROLE.USER,
-    label: '普通用户',
-    description: '不包含管理员和 Root 用户',
-  },
-  {
-    value: USER_ROLE.ADMIN,
-    label: '管理员',
-    description: '包含管理员，不包含 Root 用户',
-  },
-] as const
+const defaultFilters: QuotaGrantFilters = {
+  keyword: '',
+  roles: [USER_ROLE.USER],
+  statuses: [USER_STATUS.ENABLED],
+  balance_mode: 'any',
+  balance_amount: '',
+  balance_max: '',
+  usage_mode: 'any',
+  usage_period: '7d',
+}
 
-const statusOptions = [
-  {
-    value: USER_STATUS.ENABLED,
-    label: '已启用',
-    description: '当前可以正常使用服务的用户',
-  },
-  {
-    value: USER_STATUS.DISABLED,
-    label: '已禁用',
-    description: '当前被停用但仍保留数据的用户',
-  },
-] as const
-
-function FilterCheckbox({
-  id,
-  checked,
-  label,
-  description,
-  disabled = false,
-  onCheckedChange,
-}: {
-  id: string
-  checked: boolean
-  label: string
-  description: string
-  disabled?: boolean
-  onCheckedChange: (checked: boolean) => void
-}) {
-  return (
-    <label
-      htmlFor={id}
-      className={cn(
-        'border-border flex items-start gap-3 rounded-lg border p-3 transition-colors',
-        disabled
-          ? 'cursor-not-allowed opacity-60'
-          : 'hover:bg-muted/40 cursor-pointer'
-      )}
-    >
-      <Checkbox
-        id={id}
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={(value) => onCheckedChange(Boolean(value))}
-        className='mt-0.5'
-      />
-      <span className='min-w-0'>
-        <span className='block text-sm font-medium'>{label}</span>
-        <span className='text-muted-foreground block text-xs leading-5'>
-          {description}
-        </span>
-      </span>
-    </label>
-  )
+function quotaGrantFilterSummary(filters: QuotaGrantFilters) {
+  let statusLabel = '已禁用'
+  if (filters.statuses.length === 2) {
+    statusLabel = '全部状态'
+  } else if (filters.statuses[0] === USER_STATUS.ENABLED) {
+    statusLabel = '已启用'
+  }
+  let roleLabel = '普通用户'
+  if (filters.roles.length === 2) {
+    roleLabel = '普通用户和管理员'
+  } else if (filters.roles[0] === USER_ROLE.ADMIN) {
+    roleLabel = '管理员'
+  }
+  const parts = [statusLabel, roleLabel]
+  const balanceLabels: Record<string, string> = {
+    low: '余额 < $10',
+    negative: '负余额',
+    zero: '零余额',
+    positive: '余额 > $0',
+    lt: `余额 < $${filters.balance_amount}`,
+    lte: `余额 ≤ $${filters.balance_amount}`,
+    eq: `余额 = $${filters.balance_amount}`,
+    gte: `余额 ≥ $${filters.balance_amount}`,
+    gt: `余额 > $${filters.balance_amount}`,
+    between: `余额 $${filters.balance_amount}–$${filters.balance_max}`,
+  }
+  if (balanceLabels[filters.balance_mode]) {
+    parts.push(balanceLabels[filters.balance_mode])
+  }
+  if (filters.usage_mode !== 'any') {
+    const period =
+      filters.usage_period === 'yesterday'
+        ? '昨日'
+        : `近${filters.usage_period.replace('d', '')}天`
+    parts.push(
+      `${period}${filters.usage_mode === 'used' ? '有' : '无'}模型消耗`
+    )
+  }
+  if (filters.keyword) parts.push(`关键词：${filters.keyword}`)
+  return parts.join('；')
 }
 
 export function QuotaGrantSection() {
   const queryClient = useQueryClient()
-  const [roles, setRoles] = useState<number[]>([USER_ROLE.USER])
-  const [statuses, setStatuses] = useState<number[]>([USER_STATUS.ENABLED])
-  const [searchInput, setSearchInput] = useState('')
+  const [draftFilters, setDraftFilters] =
+    useState<QuotaGrantFilters>(defaultFilters)
+  const [filters, setFilters] = useState<QuotaGrantFilters>(defaultFilters)
   const [page, setPage] = useState(1)
   const [selectedUserIds, setSelectedUserIds] = useState<Set<number>>(
     () => new Set()
@@ -174,13 +166,6 @@ export function QuotaGrantSection() {
   const [pendingGrant, setPendingGrant] = useState<PendingQuotaGrant | null>(
     null
   )
-  const keyword = useDebounce(searchInput.trim(), 300)
-
-  const filters = useMemo<QuotaGrantFilters>(
-    () => ({ keyword, roles, statuses }),
-    [keyword, roles, statuses]
-  )
-
   const form = useForm<QuotaGrantFormValues>({
     resolver: zodResolver(quotaGrantFormSchema),
     defaultValues: { amountUsd: '', reason: '' },
@@ -228,6 +213,7 @@ export function QuotaGrantSection() {
         user_ids: grant.userIds,
         amount_usd: grant.amountUsd,
         reason: grant.reason,
+        filters: grant.filters,
       }),
     onSuccess: (response) => {
       if (!response.success || !response.data) {
@@ -261,36 +247,16 @@ export function QuotaGrantSection() {
   const pageUsers = targetPage?.items ?? []
   const total = targetPage?.total ?? 0
   const pageCount = Math.max(1, Math.ceil(total / QUOTA_GRANT_PAGE_SIZE))
-  const searchUpdatePending = searchInput.trim() !== keyword
   const filtersLocked = selectAllMutation.isPending
+  const unappliedFilters =
+    JSON.stringify(draftFilters) !== JSON.stringify(filters)
   const selectionLocked =
-    searchUpdatePending ||
-    targetsQuery.isFetching ||
-    targetsQuery.isError ||
-    filtersLocked
+    targetsQuery.isFetching || targetsQuery.isError || filtersLocked
   const pageUserIds = pageUsers.map((user) => user.id)
   const allPageSelected =
     pageUserIds.length > 0 && pageUserIds.every((id) => selectedUserIds.has(id))
   const somePageSelected =
     !allPageSelected && pageUserIds.some((id) => selectedUserIds.has(id))
-
-  const toggleFilter = (
-    value: number,
-    checked: boolean,
-    current: number[],
-    setCurrent: (values: number[]) => void,
-    label: string
-  ) => {
-    if (!checked && current.length === 1 && current[0] === value) {
-      toast.info(`请至少保留一个${label}`)
-      return
-    }
-    const next = checked
-      ? [...new Set([...current, value])]
-      : current.filter((item) => item !== value)
-    setCurrent(next)
-    setPage(1)
-  }
 
   const toggleUser = (userId: number, checked: boolean) => {
     setSelectedUserIds((current) => {
@@ -313,6 +279,10 @@ export function QuotaGrantSection() {
   }
 
   const onSubmit = (values: QuotaGrantFormValues) => {
+    if (unappliedFilters) {
+      toast.info('筛选条件已修改，请先点击查询')
+      return
+    }
     if (selectionLocked) {
       toast.info('用户清单或批量选择尚未完成，请稍候')
       return
@@ -325,6 +295,8 @@ export function QuotaGrantSection() {
       ...values,
       requestId: crypto.randomUUID(),
       userIds: [...selectedUserIds].sort((a, b) => a - b),
+      filters,
+      filterSummary: quotaGrantFilterSummary(filters),
     })
   }
 
@@ -347,67 +319,230 @@ export function QuotaGrantSection() {
             </CardDescription>
           </CardHeader>
           <CardContent className='space-y-4'>
-            <div className='grid gap-3 sm:grid-cols-2'>
-              <div className='space-y-2'>
-                <div className='text-sm font-medium'>用户状态</div>
-                {statusOptions.map((option) => (
-                  <FilterCheckbox
-                    key={option.value}
-                    id={`quota-grant-status-${option.value}`}
-                    checked={statuses.includes(option.value)}
-                    label={option.label}
-                    description={option.description}
-                    disabled={filtersLocked}
-                    onCheckedChange={(checked) =>
-                      toggleFilter(
-                        option.value,
-                        checked,
-                        statuses,
-                        setStatuses,
-                        '用户状态'
-                      )
-                    }
-                  />
-                ))}
+            <div className='bg-muted/30 grid gap-3 rounded-lg border p-3 lg:grid-cols-2'>
+              <label className='grid gap-1.5 sm:grid-cols-[88px_1fr] sm:items-center'>
+                <span className='text-sm font-medium'>用户状态</span>
+                <Select
+                  value={
+                    draftFilters.statuses.length === 2
+                      ? 'all'
+                      : String(draftFilters.statuses[0])
+                  }
+                  onValueChange={(value) =>
+                    setDraftFilters((current) => ({
+                      ...current,
+                      statuses:
+                        value === 'all'
+                          ? [USER_STATUS.ENABLED, USER_STATUS.DISABLED]
+                          : [Number(value)],
+                    }))
+                  }
+                >
+                  <SelectTrigger className='w-full'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='all'>全部用户</SelectItem>
+                    <SelectItem value={String(USER_STATUS.ENABLED)}>
+                      已启用用户
+                    </SelectItem>
+                    <SelectItem value={String(USER_STATUS.DISABLED)}>
+                      已禁用用户
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className='grid gap-1.5 sm:grid-cols-[88px_1fr] sm:items-center'>
+                <span className='text-sm font-medium'>用户角色</span>
+                <Select
+                  value={
+                    draftFilters.roles.length === 2
+                      ? 'all'
+                      : String(draftFilters.roles[0])
+                  }
+                  onValueChange={(value) =>
+                    setDraftFilters((current) => ({
+                      ...current,
+                      roles:
+                        value === 'all'
+                          ? [USER_ROLE.USER, USER_ROLE.ADMIN]
+                          : [Number(value)],
+                    }))
+                  }
+                >
+                  <SelectTrigger className='w-full'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={String(USER_ROLE.USER)}>
+                      普通用户
+                    </SelectItem>
+                    <SelectItem value={String(USER_ROLE.ADMIN)}>
+                      管理员
+                    </SelectItem>
+                    <SelectItem value='all'>普通用户和管理员</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <div className='grid gap-1.5 sm:grid-cols-[88px_1fr] sm:items-center'>
+                <span className='text-sm font-medium'>当前余额</span>
+                <div className='flex min-w-0 gap-2'>
+                  <Select
+                    value={draftFilters.balance_mode}
+                    onValueChange={(value) => {
+                      if (!value) return
+                      setDraftFilters((current) => ({
+                        ...current,
+                        balance_mode: value,
+                      }))
+                    }}
+                  >
+                    <SelectTrigger className='min-w-36 flex-1'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value='any'>不限余额</SelectItem>
+                      <SelectItem value='low'>额度不足（&lt; $10）</SelectItem>
+                      <SelectItem value='negative'>负余额</SelectItem>
+                      <SelectItem value='zero'>零余额</SelectItem>
+                      <SelectItem value='positive'>正余额</SelectItem>
+                      <SelectItem value='lt'>小于</SelectItem>
+                      <SelectItem value='lte'>小于等于</SelectItem>
+                      <SelectItem value='eq'>等于</SelectItem>
+                      <SelectItem value='gte'>大于等于</SelectItem>
+                      <SelectItem value='gt'>大于</SelectItem>
+                      <SelectItem value='between'>区间</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {['lt', 'lte', 'eq', 'gte', 'gt', 'between'].includes(
+                    draftFilters.balance_mode
+                  ) && (
+                    <Input
+                      type='number'
+                      min='0'
+                      step='0.01'
+                      value={draftFilters.balance_amount}
+                      onChange={(event) =>
+                        setDraftFilters((current) => ({
+                          ...current,
+                          balance_amount: event.target.value,
+                        }))
+                      }
+                      placeholder='美元'
+                      className='w-28'
+                    />
+                  )}
+                  {draftFilters.balance_mode === 'between' && (
+                    <Input
+                      type='number'
+                      min='0'
+                      step='0.01'
+                      value={draftFilters.balance_max}
+                      onChange={(event) =>
+                        setDraftFilters((current) => ({
+                          ...current,
+                          balance_max: event.target.value,
+                        }))
+                      }
+                      placeholder='上限'
+                      className='w-28'
+                    />
+                  )}
+                </div>
               </div>
-              <div className='space-y-2'>
-                <div className='text-sm font-medium'>用户角色</div>
-                {roleOptions.map((option) => (
-                  <FilterCheckbox
-                    key={option.value}
-                    id={`quota-grant-role-${option.value}`}
-                    checked={roles.includes(option.value)}
-                    label={option.label}
-                    description={option.description}
-                    disabled={filtersLocked}
-                    onCheckedChange={(checked) =>
-                      toggleFilter(
-                        option.value,
-                        checked,
-                        roles,
-                        setRoles,
-                        '用户角色'
-                      )
-                    }
-                  />
-                ))}
+              <div className='grid gap-1.5 sm:grid-cols-[88px_1fr] sm:items-center'>
+                <span className='text-sm font-medium'>使用情况</span>
+                <div className='flex gap-2'>
+                  <Select
+                    value={draftFilters.usage_mode}
+                    onValueChange={(value) => {
+                      if (!value) return
+                      setDraftFilters((current) => ({
+                        ...current,
+                        usage_mode: value,
+                      }))
+                    }}
+                  >
+                    <SelectTrigger className='flex-1'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value='any'>不限使用情况</SelectItem>
+                      <SelectItem value='used'>有模型消耗</SelectItem>
+                      <SelectItem value='unused'>无模型消耗</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {draftFilters.usage_mode !== 'any' && (
+                    <Select
+                      value={draftFilters.usage_period}
+                      onValueChange={(value) => {
+                        if (!value) return
+                        setDraftFilters((current) => ({
+                          ...current,
+                          usage_period: value,
+                        }))
+                      }}
+                    >
+                      <SelectTrigger className='w-28'>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value='yesterday'>昨日</SelectItem>
+                        <SelectItem value='3d'>近 3 天</SelectItem>
+                        <SelectItem value='7d'>近 7 天</SelectItem>
+                        <SelectItem value='30d'>近 30 天</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
+            <div className='flex flex-col gap-2 lg:flex-row lg:items-center'>
               <div className='relative min-w-0 flex-1'>
                 <Search className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2' />
                 <Input
-                  value={searchInput}
+                  value={draftFilters.keyword}
                   disabled={filtersLocked}
-                  onChange={(event) => {
-                    setSearchInput(event.target.value)
-                    setPage(1)
-                  }}
+                  onChange={(event) =>
+                    setDraftFilters((current) => ({
+                      ...current,
+                      keyword: event.target.value,
+                    }))
+                  }
                   placeholder='按用户 ID、用户名、显示名或邮箱搜索'
                   className='pl-8'
                 />
               </div>
+              <Button
+                type='button'
+                disabled={filtersLocked}
+                onClick={() => {
+                  const next = {
+                    ...draftFilters,
+                    keyword: draftFilters.keyword.trim(),
+                  }
+                  if (
+                    ['lt', 'lte', 'eq', 'gte', 'gt', 'between'].includes(
+                      next.balance_mode
+                    ) &&
+                    !next.balance_amount
+                  ) {
+                    toast.error('请填写余额金额')
+                    return
+                  }
+                  if (next.balance_mode === 'between' && !next.balance_max) {
+                    toast.error('请填写余额区间上限')
+                    return
+                  }
+                  setFilters(next)
+                  setPage(1)
+                  setSelectedUserIds(new Set())
+                }}
+              >
+                <Search className='size-4' />
+                查询
+              </Button>
               <Button
                 type='button'
                 variant='outline'
@@ -429,7 +564,7 @@ export function QuotaGrantSection() {
               </Button>
             </div>
 
-            <div className='border-border overflow-hidden rounded-lg border'>
+            <div className='border-border overflow-x-auto rounded-lg border'>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -448,19 +583,21 @@ export function QuotaGrantSection() {
                     <TableHead>状态</TableHead>
                     <TableHead>角色</TableHead>
                     <TableHead>当前余额</TableHead>
+                    <TableHead>最近使用（30 天内）</TableHead>
+                    <TableHead>近 7 天消耗</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {targetsQuery.isLoading && (
                     <TableRow>
-                      <TableCell colSpan={5} className='h-32 text-center'>
+                      <TableCell colSpan={7} className='h-32 text-center'>
                         <Loader2 className='text-muted-foreground mx-auto size-5 animate-spin' />
                       </TableCell>
                     </TableRow>
                   )}
                   {targetsQuery.isError && (
                     <TableRow>
-                      <TableCell colSpan={5} className='h-40 text-center'>
+                      <TableCell colSpan={7} className='h-40 text-center'>
                         <div className='mx-auto flex max-w-md flex-col items-center gap-2'>
                           <div className='text-destructive font-medium'>
                             用户清单加载失败
@@ -490,7 +627,7 @@ export function QuotaGrantSection() {
                     pageUsers.length === 0 && (
                       <TableRow>
                         <TableCell
-                          colSpan={5}
+                          colSpan={7}
                           className='text-muted-foreground h-32 text-center'
                         >
                           当前筛选条件下没有可发放用户
@@ -549,6 +686,12 @@ export function QuotaGrantSection() {
                             : '普通用户'}
                         </TableCell>
                         <TableCell>{formatQuota(user.quota)}</TableCell>
+                        <TableCell className='whitespace-nowrap'>
+                          {user.last_used_at
+                            ? formatTimestampToDate(user.last_used_at)
+                            : '近 30 天无记录'}
+                        </TableCell>
+                        <TableCell>{formatQuota(user.used_quota_7d)}</TableCell>
                       </TableRow>
                     ))}
                 </TableBody>
@@ -558,6 +701,7 @@ export function QuotaGrantSection() {
             <div className='flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between'>
               <div className='text-muted-foreground'>
                 当前筛选 {total} 人，已勾选 {selectedUserIds.size} 人
+                {unappliedFilters ? '，有未应用的筛选条件' : ''}
                 {targetsQuery.isFetching && !targetsQuery.isLoading
                   ? '，正在刷新…'
                   : ''}
@@ -673,7 +817,11 @@ export function QuotaGrantSection() {
                 <Button
                   type='submit'
                   className='w-full'
-                  disabled={selectedUserIds.size === 0 || selectionLocked}
+                  disabled={
+                    selectedUserIds.size === 0 ||
+                    selectionLocked ||
+                    unappliedFilters
+                  }
                 >
                   核对并发放
                 </Button>
@@ -698,6 +846,14 @@ export function QuotaGrantSection() {
                 <strong>${Number(pendingGrant.amountUsd).toFixed(2)}</strong>
                 ，合计 <strong>${pendingTotal}</strong>。
               </p>
+              <div className='bg-muted rounded-lg p-3'>
+                <div className='text-foreground text-xs font-medium'>
+                  筛选条件
+                </div>
+                <div className='text-muted-foreground mt-1 text-sm'>
+                  {pendingGrant.filterSummary}
+                </div>
+              </div>
               <div className='bg-muted rounded-lg p-3'>
                 <div className='text-foreground text-xs font-medium'>
                   发放原因

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Loader2 } from 'lucide-react'
-import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -52,23 +52,30 @@ export function UserInfoDialog(props: UserInfoDialogProps) {
   const { t } = useTranslation()
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const requestSequence = useRef(0)
 
   const fetchUserInfo = useCallback(
     async (id: number) => {
+      const sequence = ++requestSequence.current
+      setUserInfo(null)
       setIsLoading(true)
       try {
         const result = await getUserInfo(id)
+        if (sequence !== requestSequence.current) return
         if (result.success) {
           setUserInfo(result.data || null)
         } else {
           toast.error(result.message || t('Failed to fetch user information'))
         }
       } catch (error) {
+        if (sequence !== requestSequence.current) return
         // eslint-disable-next-line no-console
         console.error('Failed to fetch user info:', error)
         toast.error(t('Failed to fetch user information'))
       } finally {
-        setIsLoading(false)
+        if (sequence === requestSequence.current) {
+          setIsLoading(false)
+        }
       }
     },
     [t]
@@ -77,11 +84,21 @@ export function UserInfoDialog(props: UserInfoDialogProps) {
   useEffect(() => {
     if (props.open && props.userId) {
       fetchUserInfo(props.userId)
+      return
     }
+    requestSequence.current += 1
+    setIsLoading(false)
+    setUserInfo(null)
   }, [props.open, props.userId, fetchUserInfo])
 
   let dialogBody: ReactNode
-  if (isLoading) {
+  if (
+    isLoading ||
+    (props.open &&
+      props.userId !== null &&
+      userInfo !== null &&
+      userInfo.id !== props.userId)
+  ) {
     dialogBody = (
       <div className='flex items-center justify-center py-8'>
         <Loader2 className='text-muted-foreground size-6 animate-spin' />
@@ -92,6 +109,7 @@ export function UserInfoDialog(props: UserInfoDialogProps) {
       <div className='space-y-4 py-4'>
         {/* Basic Info */}
         <div className='grid grid-cols-2 gap-4'>
+          <InfoItem label='用户 ID' value={userInfo.id} />
           <InfoItem label={t('Username')} value={userInfo.username} />
           {userInfo.display_name ? (
             <InfoItem label={t('Display Name')} value={userInfo.display_name} />

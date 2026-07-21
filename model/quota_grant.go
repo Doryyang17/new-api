@@ -32,6 +32,9 @@ type QuotaGrantBatch struct {
 	Quota          int    `json:"quota"`
 	AmountUsd      string `json:"amount_usd" gorm:"type:varchar(32)"`
 	Reason         string `json:"reason" gorm:"type:varchar(255)"`
+	FilterJson     string `json:"filter_json" gorm:"type:text"`
+	FilterSummary  string `json:"filter_summary" gorm:"type:varchar(500)"`
+	Result         string `json:"result" gorm:"type:varchar(32)"`
 	TargetCount    int    `json:"target_count"`
 	TargetHash     string `json:"-" gorm:"type:varchar(64)"`
 	CreatedAt      int64  `json:"created_at" gorm:"autoCreateTime"`
@@ -45,8 +48,38 @@ type QuotaGrantBatchParams struct {
 	Quota          int
 	AmountUsd      string
 	Reason         string
+	FilterJson     string
+	FilterSummary  string
 	Ip             string
 	AdminInfo      map[string]interface{}
+	Filters        QuotaGrantTargetFilters
+}
+
+type QuotaGrantTargetFilters struct {
+	Keyword           string
+	Roles             []int
+	Statuses          []int
+	MinQuota          *int
+	MinQuotaInclusive bool
+	MaxQuota          *int
+	MaxQuotaInclusive bool
+	UsageMode         string
+	UsageStartAt      int64
+	UsageEndAt        int64
+}
+
+type QuotaGrantTarget struct {
+	Id          int    `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	Quota       int    `json:"quota"`
+	Role        int    `json:"role"`
+	Status      int    `json:"status"`
+	Group       string `json:"group"`
+	CreatedAt   int64  `json:"created_at"`
+	LastUsedAt  int64  `json:"last_used_at"`
+	UsedQuota7d int64  `json:"used_quota_7d"`
 }
 
 type QuotaGrantBatchResult struct {
@@ -55,38 +88,111 @@ type QuotaGrantBatchResult struct {
 	CacheSyncPending bool            `json:"cache_sync_pending"`
 }
 
-func ListQuotaGrantTargets(keyword string, roles []int, statuses []int, startIdx int, pageSize int) ([]*User, int64, error) {
-	query := quotaGrantTargetQuery(DB, keyword, roles, statuses)
+func ListQuotaGrantTargets(filters QuotaGrantTargetFilters, startIdx int, pageSize int, sevenDayStart int64, recentUsageStart int64) ([]*QuotaGrantTarget, int64, error) {
+	query, err := quotaGrantTargetQuery(DB, filters)
+	if err != nil {
+		return nil, 0, err
+	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	var users []*User
-	err := query.
+	var users []*QuotaGrantTarget
+	err = query.
 		Select("id", "username", "display_name", "email", "quota", "role", "status", commonGroupCol, "created_at").
 		Order("id desc").
 		Limit(pageSize).
 		Offset(startIdx).
 		Find(&users).Error
+	if err != nil || len(users) == 0 {
+		return users, total, err
+	}
+
+	userIds := make([]int, 0, len(users))
+	for _, user := range users {
+		userIds = append(userIds, user.Id)
+	}
+	var usageRows []struct {
+		UserId      int
+		LastUsedAt  int64
+		UsedQuota7d int64
+	}
+	err = LOG_DB.Model(&Log{}).
+		Select("user_id, MAX(created_at) AS last_used_at, SUM(CASE WHEN created_at >= ? THEN quota ELSE 0 END) AS used_quota7d", sevenDayStart).
+		Where("type = ? AND user_id IN ? AND created_at >= ?", LogTypeConsume, userIds, recentUsageStart).
+		Group("user_id").
+		Scan(&usageRows).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	usageByUser := make(map[int]struct {
+		LastUsedAt  int64
+		UsedQuota7d int64
+	}, len(usageRows))
+	for _, row := range usageRows {
+		usageByUser[row.UserId] = struct {
+			LastUsedAt  int64
+			UsedQuota7d int64
+		}{LastUsedAt: row.LastUsedAt, UsedQuota7d: row.UsedQuota7d}
+	}
+	for _, user := range users {
+		usage := usageByUser[user.Id]
+		user.LastUsedAt = usage.LastUsedAt
+		user.UsedQuota7d = usage.UsedQuota7d
+	}
 	return users, total, err
 }
 
-func ListQuotaGrantTargetIds(keyword string, roles []int, statuses []int) ([]int, error) {
+func ListQuotaGrantTargetIds(filters QuotaGrantTargetFilters) ([]int, error) {
 	var ids []int
-	err := quotaGrantTargetQuery(DB, keyword, roles, statuses).
+	query, err := quotaGrantTargetQuery(DB, filters)
+	if err != nil {
+		return nil, err
+	}
+	err = query.
 		Order("id desc").
 		Pluck("id", &ids).Error
 	return ids, err
 }
 
-func quotaGrantTargetQuery(tx *gorm.DB, keyword string, roles []int, statuses []int) *gorm.DB {
+func quotaGrantTargetQuery(tx *gorm.DB, filters QuotaGrantTargetFilters) (*gorm.DB, error) {
 	query := tx.Model(&User{}).
-		Where("role IN ?", roles).
-		Where("status IN ?", statuses)
-	keyword = strings.TrimSpace(keyword)
+		Where("role IN ?", filters.Roles).
+		Where("status IN ?", filters.Statuses)
+	if filters.MinQuota != nil {
+		operator := ">"
+		if filters.MinQuotaInclusive {
+			operator = ">="
+		}
+		query = query.Where("quota "+operator+" ?", *filters.MinQuota)
+	}
+	if filters.MaxQuota != nil {
+		operator := "<"
+		if filters.MaxQuotaInclusive {
+			operator = "<="
+		}
+		query = query.Where("quota "+operator+" ?", *filters.MaxQuota)
+	}
+	if filters.UsageMode != "" {
+		if LOG_DB != DB {
+			return nil, errors.New("近期使用筛选要求使用主数据库日志，当前独立日志数据库不支持该筛选")
+		}
+		condition := "EXISTS (SELECT 1 FROM logs WHERE logs.user_id = users.id AND logs.type = ? AND logs.created_at >= ?"
+		args := []interface{}{LogTypeConsume, filters.UsageStartAt}
+		if filters.UsageEndAt > 0 {
+			condition += " AND logs.created_at < ?"
+			args = append(args, filters.UsageEndAt)
+		}
+		condition += ")"
+		if filters.UsageMode == "unused" {
+			condition = "NOT " + condition
+		}
+		query = query.Where(condition, args...)
+	}
+	keyword := strings.TrimSpace(filters.Keyword)
 	if keyword == "" {
-		return query
+		return query, nil
 	}
 
 	condition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
@@ -96,7 +202,7 @@ func quotaGrantTargetQuery(tx *gorm.DB, keyword string, roles []int, statuses []
 		condition = "id = ? OR " + condition
 		args = append([]interface{}{id}, args...)
 	}
-	return query.Where("("+condition+")", args...)
+	return query.Where("("+condition+")", args...), nil
 }
 
 func GrantUserQuotaBatch(params QuotaGrantBatchParams) (*QuotaGrantBatchResult, error) {
@@ -105,6 +211,12 @@ func GrantUserQuotaBatch(params QuotaGrantBatchParams) (*QuotaGrantBatchResult, 
 	}
 	if params.Quota <= 0 || params.Quota > common.MaxQuota {
 		return nil, errors.New("发放额度必须大于 0 且不超过系统额度上限")
+	}
+	if len(params.Filters.Roles) == 0 {
+		params.Filters.Roles = []int{common.RoleCommonUser, common.RoleAdminUser}
+	}
+	if len(params.Filters.Statuses) == 0 {
+		params.Filters.Statuses = []int{common.UserStatusEnabled, common.UserStatusDisabled}
 	}
 
 	targetIds := append([]int(nil), params.TargetUserIds...)
@@ -121,6 +233,9 @@ func GrantUserQuotaBatch(params QuotaGrantBatchParams) (*QuotaGrantBatchResult, 
 		Quota:          params.Quota,
 		AmountUsd:      params.AmountUsd,
 		Reason:         params.Reason,
+		FilterJson:     params.FilterJson,
+		FilterSummary:  params.FilterSummary,
+		Result:         "success",
 		TargetCount:    len(targetIds),
 		TargetHash:     targetHash,
 	}
@@ -147,17 +262,19 @@ func GrantUserQuotaBatch(params QuotaGrantBatchParams) (*QuotaGrantBatchResult, 
 			return ErrQuotaGrantAlreadyProcessed
 		}
 
+		targetQuery, queryErr := quotaGrantTargetQuery(tx, params.Filters)
+		if queryErr != nil {
+			return queryErr
+		}
 		var users []*User
-		if err := lockForUpdate(tx).
+		if err := lockForUpdate(targetQuery).
 			Where("id IN ?", targetIds).
-			Where("role IN ?", []int{common.RoleCommonUser, common.RoleAdminUser}).
-			Where("status IN ?", []int{common.UserStatusEnabled, common.UserStatusDisabled}).
 			Order("id asc").
 			Find(&users).Error; err != nil {
 			return err
 		}
 		if len(users) != len(targetIds) {
-			return errors.New("部分用户已不存在或不再符合发放条件，请刷新用户清单后重试")
+			return errors.New("部分用户已不存在或不再符合当前筛选条件，请刷新用户清单后重试")
 		}
 		for _, user := range users {
 			if user.Quota > common.MaxQuota-params.Quota {
@@ -204,6 +321,8 @@ func GrantUserQuotaBatch(params QuotaGrantBatchParams) (*QuotaGrantBatchResult, 
 			"amount_usd": params.AmountUsd,
 			"count":      len(users),
 			"reason":     params.Reason,
+			"filters":    params.FilterSummary,
+			"result":     "success",
 		}
 		operatorOther := map[string]interface{}{
 			"op":         buildOpField("user.quota_grant_batch", operatorParams),
@@ -262,10 +381,13 @@ func findQuotaGrantBatch(requestId string) (QuotaGrantBatch, bool, error) {
 }
 
 func quotaGrantExistingResult(existing QuotaGrantBatch, expected QuotaGrantBatch) (*QuotaGrantBatchResult, error) {
+	legacyBatch := existing.FilterJson == "" && existing.FilterSummary == ""
 	if existing.OperatorUserId != expected.OperatorUserId ||
 		existing.Quota != expected.Quota ||
 		existing.AmountUsd != expected.AmountUsd ||
 		existing.Reason != expected.Reason ||
+		(!legacyBatch && existing.FilterJson != expected.FilterJson) ||
+		(!legacyBatch && existing.FilterSummary != expected.FilterSummary) ||
 		existing.TargetCount != expected.TargetCount ||
 		existing.TargetHash != expected.TargetHash {
 		return nil, ErrQuotaGrantIdempotencyConflict

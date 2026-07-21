@@ -16,17 +16,35 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { User } from '@/features/users/types'
 import { api } from '@/lib/api'
 
 export type QuotaGrantFilters = {
   keyword: string
   roles: number[]
   statuses: number[]
+  balance_mode: string
+  balance_amount: string
+  balance_max: string
+  usage_mode: string
+  usage_period: string
+}
+
+export type QuotaGrantTarget = {
+  id: number
+  username: string
+  display_name: string
+  email: string
+  quota: number
+  role: number
+  status: number
+  group: string
+  created_at: number
+  last_used_at: number
+  used_quota_7d: number
 }
 
 export type QuotaGrantTargetPage = {
-  items: User[]
+  items: QuotaGrantTarget[]
   total: number
   page: number
   page_size: number
@@ -46,6 +64,9 @@ export type QuotaGrantBatchResult = {
     quota: number
     amount_usd: string
     reason: string
+    filter_json: string
+    filter_summary: string
+    result: string
     target_count: number
     created_at: number
   }
@@ -58,6 +79,11 @@ function quotaGrantFilterParams(filters: QuotaGrantFilters) {
     keyword: filters.keyword,
     roles: filters.roles.join(','),
     statuses: filters.statuses.join(','),
+    balance_mode: filters.balance_mode,
+    balance_amount: filters.balance_amount,
+    balance_max: filters.balance_max,
+    usage_mode: filters.usage_mode,
+    usage_period: filters.usage_period,
   }
 }
 
@@ -92,6 +118,7 @@ export async function grantUserQuota(request: {
   user_ids: number[]
   amount_usd: string
   reason: string
+  filters: QuotaGrantFilters
 }) {
   const response = await api.post<ApiResponse<QuotaGrantBatchResult>>(
     '/api/user/quota-grants',
