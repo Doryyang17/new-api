@@ -109,6 +109,7 @@ const defaultFilters: QuotaGrantFilters = {
   balance_amount: '',
   balance_max: '',
   recharge_mode: 'any',
+  recharge_date: '',
   usage_mode: 'any',
   usage_period: '7d',
 }
@@ -143,7 +144,15 @@ function quotaGrantFilterSummary(filters: QuotaGrantFilters) {
     parts.push(balanceLabels[filters.balance_mode])
   }
   if (filters.recharge_mode !== 'any') {
-    parts.push(filters.recharge_mode === 'recharged' ? '已充值' : '未充值')
+    if (filters.recharge_mode === 'recharged') {
+      parts.push('已充值')
+    } else if (filters.recharge_mode === 'unrecharged') {
+      parts.push('未充值')
+    } else if (filters.recharge_mode === 'yesterday') {
+      parts.push('昨日充值')
+    } else {
+      parts.push(`${filters.recharge_date} 充值`)
+    }
   }
   if (filters.usage_mode !== 'any') {
     const period =
@@ -456,25 +465,43 @@ export function QuotaGrantSection() {
               </div>
               <div className='grid gap-1.5 sm:grid-cols-[88px_1fr] sm:items-center'>
                 <span className='text-sm font-medium'>充值情况</span>
-                <Select
-                  value={draftFilters.recharge_mode}
-                  onValueChange={(value) => {
-                    if (!value) return
-                    setDraftFilters((current) => ({
-                      ...current,
-                      recharge_mode: value,
-                    }))
-                  }}
-                >
-                  <SelectTrigger className='w-full'>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value='any'>不限充值情况</SelectItem>
-                    <SelectItem value='recharged'>已充值用户</SelectItem>
-                    <SelectItem value='unrecharged'>未充值用户</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className='flex min-w-0 flex-col gap-2 sm:flex-row'>
+                  <Select
+                    value={draftFilters.recharge_mode}
+                    onValueChange={(value) => {
+                      if (!value) return
+                      setDraftFilters((current) => ({
+                        ...current,
+                        recharge_mode: value,
+                      }))
+                    }}
+                  >
+                    <SelectTrigger className='min-w-0 flex-1'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value='any'>不限充值情况</SelectItem>
+                      <SelectItem value='recharged'>已充值用户</SelectItem>
+                      <SelectItem value='unrecharged'>未充值用户</SelectItem>
+                      <SelectItem value='yesterday'>昨日充值用户</SelectItem>
+                      <SelectItem value='date'>指定日期充值用户</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {draftFilters.recharge_mode === 'date' && (
+                    <Input
+                      type='date'
+                      value={draftFilters.recharge_date}
+                      onChange={(event) =>
+                        setDraftFilters((current) => ({
+                          ...current,
+                          recharge_date: event.target.value,
+                        }))
+                      }
+                      aria-label='指定充值日期'
+                      className='w-full sm:w-40'
+                    />
+                  )}
+                </div>
               </div>
               <div className='grid gap-1.5 sm:grid-cols-[88px_1fr] sm:items-center'>
                 <span className='text-sm font-medium'>使用情况</span>
@@ -559,6 +586,10 @@ export function QuotaGrantSection() {
                   }
                   if (next.balance_mode === 'between' && !next.balance_max) {
                     toast.error('请填写余额区间上限')
+                    return
+                  }
+                  if (next.recharge_mode === 'date' && !next.recharge_date) {
+                    toast.error('请选择充值日期')
                     return
                   }
                   setFilters(next)

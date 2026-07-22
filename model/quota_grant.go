@@ -64,6 +64,8 @@ type QuotaGrantTargetFilters struct {
 	MaxQuota          *int
 	MaxQuotaInclusive bool
 	RechargeMode      string
+	RechargeStartAt   int64
+	RechargeEndAt     int64
 	UsageMode         string
 	UsageStartAt      int64
 	UsageEndAt        int64
@@ -177,10 +179,21 @@ func quotaGrantTargetQuery(tx *gorm.DB, filters QuotaGrantTargetFilters) (*gorm.
 	}
 	if filters.RechargeMode != "" {
 		condition := "EXISTS (SELECT 1 FROM top_ups WHERE top_ups.user_id = users.id AND top_ups.status = ? AND top_ups.credited_quota > 0)"
-		if filters.RechargeMode == "unrecharged" {
+		args := []interface{}{common.TopUpStatusSuccess}
+		switch filters.RechargeMode {
+		case "unrecharged":
 			condition = "NOT " + condition
+		case "recharged":
+		case "yesterday", "date":
+			if filters.RechargeStartAt <= 0 || filters.RechargeEndAt <= filters.RechargeStartAt {
+				return nil, errors.New("充值日期范围无效")
+			}
+			condition = "EXISTS (SELECT 1 FROM top_ups WHERE top_ups.user_id = users.id AND top_ups.status = ? AND top_ups.credited_quota > 0 AND top_ups.complete_time >= ? AND top_ups.complete_time < ?)"
+			args = append(args, filters.RechargeStartAt, filters.RechargeEndAt)
+		default:
+			return nil, errors.New("不支持的充值情况筛选")
 		}
-		query = query.Where(condition, common.TopUpStatusSuccess)
+		query = query.Where(condition, args...)
 	}
 	if filters.UsageMode != "" {
 		if LOG_DB != DB {

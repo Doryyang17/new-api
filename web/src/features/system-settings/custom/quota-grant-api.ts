@@ -26,6 +26,7 @@ export type QuotaGrantFilters = {
   balance_amount: string
   balance_max: string
   recharge_mode: string
+  recharge_date: string
   usage_mode: string
   usage_period: string
 }
@@ -84,6 +85,7 @@ function quotaGrantFilterParams(filters: QuotaGrantFilters) {
     balance_amount: filters.balance_amount,
     balance_max: filters.balance_max,
     recharge_mode: filters.recharge_mode,
+    recharge_date: filters.recharge_date,
     usage_mode: filters.usage_mode,
     usage_period: filters.usage_period,
   }

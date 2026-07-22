@@ -35,6 +35,7 @@ type quotaGrantFilterRequest struct {
 	BalanceAmount string `json:"balance_amount"`
 	BalanceMax    string `json:"balance_max"`
 	RechargeMode  string `json:"recharge_mode"`
+	RechargeDate  string `json:"recharge_date"`
 	UsageMode     string `json:"usage_mode"`
 	UsagePeriod   string `json:"usage_period"`
 }
@@ -225,6 +226,7 @@ func quotaGrantFiltersFromQuery(c *gin.Context, now time.Time) (model.QuotaGrant
 		BalanceAmount: c.Query("balance_amount"),
 		BalanceMax:    c.Query("balance_max"),
 		RechargeMode:  c.Query("recharge_mode"),
+		RechargeDate:  c.Query("recharge_date"),
 		UsageMode:     c.Query("usage_mode"),
 		UsagePeriod:   c.Query("usage_period"),
 	}, now)
@@ -275,7 +277,7 @@ func normalizeQuotaGrantFilters(request quotaGrantFilterRequest, now time.Time) 
 		summary = append(summary, balanceSummary)
 	}
 
-	rechargeSummary, err := applyQuotaGrantRechargeFilter(&filters, request)
+	rechargeSummary, err := applyQuotaGrantRechargeFilter(&filters, request, now)
 	if err != nil {
 		return model.QuotaGrantTargetFilters{}, "", "", err
 	}
@@ -363,19 +365,51 @@ func applyQuotaGrantBalanceFilter(filters *model.QuotaGrantTargetFilters, reques
 	}
 }
 
-func applyQuotaGrantRechargeFilter(filters *model.QuotaGrantTargetFilters, request quotaGrantFilterRequest) (string, error) {
+func applyQuotaGrantRechargeFilter(filters *model.QuotaGrantTargetFilters, request quotaGrantFilterRequest, now time.Time) (string, error) {
 	mode := strings.TrimSpace(request.RechargeMode)
 	if mode == "" || mode == "any" {
 		return "", nil
 	}
-	if mode != "recharged" && mode != "unrecharged" {
+	if mode != "recharged" && mode != "unrecharged" && mode != "yesterday" && mode != "date" {
 		return "", errors.New("不支持的充值情况筛选")
 	}
 	filters.RechargeMode = mode
 	if mode == "recharged" {
 		return "已充值", nil
 	}
-	return "未充值", nil
+	if mode == "unrecharged" {
+		return "未充值", nil
+	}
+	startAt, endAt, dateLabel, err := quotaGrantRechargeDateWindow(mode, request.RechargeDate, now)
+	if err != nil {
+		return "", err
+	}
+	filters.RechargeStartAt = startAt
+	filters.RechargeEndAt = endAt
+	if mode == "yesterday" {
+		return "昨日充值", nil
+	}
+	return dateLabel + " 充值", nil
+}
+
+func quotaGrantRechargeDateWindow(mode string, rawDate string, now time.Time) (int64, int64, string, error) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return 0, 0, "", err
+	}
+	localNow := now.In(location)
+	if mode == "yesterday" {
+		today := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
+		start := today.AddDate(0, 0, -1)
+		return start.Unix(), today.Unix(), start.Format("2006-01-02"), nil
+	}
+
+	dateValue := strings.TrimSpace(rawDate)
+	parsed, err := time.ParseInLocation("2006-01-02", dateValue, location)
+	if err != nil || parsed.Format("2006-01-02") != dateValue {
+		return 0, 0, "", errors.New("指定充值日期格式不正确")
+	}
+	return parsed.Unix(), parsed.AddDate(0, 0, 1).Unix(), dateValue, nil
 }
 
 func applyQuotaGrantUsageFilter(filters *model.QuotaGrantTargetFilters, request quotaGrantFilterRequest, now time.Time) (string, error) {

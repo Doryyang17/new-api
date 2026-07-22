@@ -282,17 +282,26 @@ func TestListQuotaGrantTargetsExcludesRootAndDeletedUsers(t *testing.T) {
 
 func TestListQuotaGrantTargetsFiltersBySuccessfulWalletRecharge(t *testing.T) {
 	truncateTables(t)
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	dateStart := time.Date(2026, 7, 20, 0, 0, 0, 0, location)
+	yesterdayStart := dateStart.AddDate(0, 0, 1)
+	yesterdayEnd := yesterdayStart.AddDate(0, 0, 1)
 	users := []*User{
 		{Id: 25, Username: "grant-recharged", Password: "password123", AffCode: "grant-recharged", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
 		{Id: 26, Username: "grant-pending-recharge", Password: "password123", AffCode: "grant-pending-recharge", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
 		{Id: 27, Username: "grant-unrecharged", Password: "password123", AffCode: "grant-unrecharged", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
 		{Id: 28, Username: "grant-subscription-only", Password: "password123", AffCode: "grant-subscription-only", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
+		{Id: 29, Username: "grant-yesterday-recharge", Password: "password123", AffCode: "grant-yesterday-recharge", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
+		{Id: 30, Username: "grant-date-recharge", Password: "password123", AffCode: "grant-date-recharge", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
 	}
 	require.NoError(t, DB.CreateInBatches(&users, 20).Error)
 	require.NoError(t, DB.CreateInBatches([]*TopUp{
 		{UserId: 25, TradeNo: "grant-recharged-success", Status: common.TopUpStatusSuccess, CreditedQuota: 100},
 		{UserId: 26, TradeNo: "grant-recharged-pending", Status: common.TopUpStatusPending, CreditedQuota: 100},
 		{UserId: 28, TradeNo: "grant-subscription-success", Status: common.TopUpStatusSuccess, CreditedQuota: 0},
+		{UserId: 29, TradeNo: "grant-recharged-yesterday", Status: common.TopUpStatusSuccess, CreditedQuota: 100, CompleteTime: yesterdayStart.Add(2 * time.Hour).Unix()},
+		{UserId: 30, TradeNo: "grant-recharged-date", Status: common.TopUpStatusSuccess, CreditedQuota: 100, CompleteTime: dateStart.Add(2 * time.Hour).Unix()},
 	}, 20).Error)
 
 	baseFilters := QuotaGrantTargetFilters{
@@ -302,12 +311,26 @@ func TestListQuotaGrantTargetsFiltersBySuccessfulWalletRecharge(t *testing.T) {
 	baseFilters.RechargeMode = "recharged"
 	ids, err := ListQuotaGrantTargetIds(baseFilters)
 	require.NoError(t, err)
-	assert.Equal(t, []int{25}, ids)
+	assert.Equal(t, []int{30, 29, 25}, ids)
 
 	baseFilters.RechargeMode = "unrecharged"
 	ids, err = ListQuotaGrantTargetIds(baseFilters)
 	require.NoError(t, err)
 	assert.Equal(t, []int{28, 27, 26}, ids)
+
+	baseFilters.RechargeMode = "yesterday"
+	baseFilters.RechargeStartAt = yesterdayStart.Unix()
+	baseFilters.RechargeEndAt = yesterdayEnd.Unix()
+	ids, err = ListQuotaGrantTargetIds(baseFilters)
+	require.NoError(t, err)
+	assert.Equal(t, []int{29}, ids)
+
+	baseFilters.RechargeMode = "date"
+	baseFilters.RechargeStartAt = dateStart.Unix()
+	baseFilters.RechargeEndAt = yesterdayStart.Unix()
+	ids, err = ListQuotaGrantTargetIds(baseFilters)
+	require.NoError(t, err)
+	assert.Equal(t, []int{30}, ids)
 }
 
 func TestListQuotaGrantTargetsAppliesBalanceUsageAndStatusIntersection(t *testing.T) {

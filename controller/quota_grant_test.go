@@ -70,6 +70,33 @@ func TestNormalizeQuotaGrantFiltersRejectsInvalidRechargeMode(t *testing.T) {
 	assert.ErrorContains(t, err, "不支持的充值情况筛选")
 }
 
+func TestNormalizeQuotaGrantFiltersBuildsRechargeDateWindows(t *testing.T) {
+	now := time.Date(2026, 7, 22, 1, 0, 0, 0, time.UTC)
+	filters, _, summary, err := normalizeQuotaGrantFilters(quotaGrantFilterRequest{
+		RechargeMode: "yesterday",
+	}, now)
+	require.NoError(t, err)
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	assert.Equal(t, time.Date(2026, 7, 21, 0, 0, 0, 0, location).Unix(), filters.RechargeStartAt)
+	assert.Equal(t, time.Date(2026, 7, 22, 0, 0, 0, 0, location).Unix(), filters.RechargeEndAt)
+	assert.Contains(t, summary, "昨日充值")
+
+	filters, _, summary, err = normalizeQuotaGrantFilters(quotaGrantFilterRequest{
+		RechargeMode: "date",
+		RechargeDate: "2026-07-20",
+	}, now)
+	require.NoError(t, err)
+	assert.Equal(t, time.Date(2026, 7, 20, 0, 0, 0, 0, location).Unix(), filters.RechargeStartAt)
+	assert.Equal(t, time.Date(2026, 7, 21, 0, 0, 0, 0, location).Unix(), filters.RechargeEndAt)
+	assert.Contains(t, summary, "2026-07-20 充值")
+}
+
+func TestNormalizeQuotaGrantFiltersRejectsMissingRechargeDate(t *testing.T) {
+	_, _, _, err := normalizeQuotaGrantFilters(quotaGrantFilterRequest{RechargeMode: "date"}, time.Now())
+	assert.ErrorContains(t, err, "指定充值日期格式不正确")
+}
+
 func TestNormalizeQuotaGrantFiltersUsesBeijingYesterdayWindow(t *testing.T) {
 	now := time.Date(2026, 7, 21, 20, 0, 0, 0, time.UTC)
 	filters, _, summary, err := normalizeQuotaGrantFilters(quotaGrantFilterRequest{
