@@ -69,20 +69,23 @@ type QuotaGrantTargetFilters struct {
 	UsageMode         string
 	UsageStartAt      int64
 	UsageEndAt        int64
+	UsageModels       []string
 }
 
 type QuotaGrantTarget struct {
-	Id          int    `json:"id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	Email       string `json:"email"`
-	Quota       int    `json:"quota"`
-	Role        int    `json:"role"`
-	Status      int    `json:"status"`
-	Group       string `json:"group"`
-	CreatedAt   int64  `json:"created_at"`
-	LastUsedAt  int64  `json:"last_used_at"`
-	UsedQuota7d int64  `json:"used_quota_7d"`
+	Id                int    `json:"id"`
+	Username          string `json:"username"`
+	DisplayName       string `json:"display_name"`
+	Email             string `json:"email"`
+	Quota             int    `json:"quota"`
+	Role              int    `json:"role"`
+	Status            int    `json:"status"`
+	Group             string `json:"group"`
+	CreatedAt         int64  `json:"created_at"`
+	LastUsedAt        int64  `json:"last_used_at"`
+	LastUsedAtInScope int64  `json:"last_used_at_in_scope"`
+	UsedQuota7d       int64  `json:"used_quota_7d"`
+	UsedQuotaInScope  int64  `json:"used_quota_in_scope"`
 }
 
 type QuotaGrantBatchResult struct {
@@ -116,7 +119,7 @@ func ListQuotaGrantTargets(filters QuotaGrantTargetFilters, startIdx int, pageSi
 	for _, user := range users {
 		userIds = append(userIds, user.Id)
 	}
-	var usageRows []struct {
+	var legacyUsageRows []struct {
 		UserId      int
 		LastUsedAt  int64
 		UsedQuota7d int64
@@ -125,26 +128,67 @@ func ListQuotaGrantTargets(filters QuotaGrantTargetFilters, startIdx int, pageSi
 		Select("user_id, MAX(created_at) AS last_used_at, SUM(CASE WHEN created_at >= ? THEN quota ELSE 0 END) AS used_quota7d", sevenDayStart).
 		Where("type = ? AND user_id IN ? AND created_at >= ?", LogTypeConsume, userIds, recentUsageStart).
 		Group("user_id").
-		Scan(&usageRows).Error
+		Scan(&legacyUsageRows).Error
 	if err != nil {
 		return nil, 0, err
 	}
-	usageByUser := make(map[int]struct {
+	legacyUsageByUser := make(map[int]struct {
 		LastUsedAt  int64
 		UsedQuota7d int64
-	}, len(usageRows))
-	for _, row := range usageRows {
-		usageByUser[row.UserId] = struct {
+	}, len(legacyUsageRows))
+	for _, row := range legacyUsageRows {
+		legacyUsageByUser[row.UserId] = struct {
 			LastUsedAt  int64
 			UsedQuota7d int64
 		}{LastUsedAt: row.LastUsedAt, UsedQuota7d: row.UsedQuota7d}
 	}
 	for _, user := range users {
-		usage := usageByUser[user.Id]
+		usage := legacyUsageByUser[user.Id]
 		user.LastUsedAt = usage.LastUsedAt
+		user.LastUsedAtInScope = usage.LastUsedAt
 		user.UsedQuota7d = usage.UsedQuota7d
+		user.UsedQuotaInScope = usage.UsedQuota7d
 	}
-	return users, total, err
+	if filters.UsageMode == "" {
+		return users, total, nil
+	}
+
+	var scopedUsageRows []struct {
+		UserId            int
+		LastUsedAtInScope int64
+		UsedQuotaInScope  int64
+	}
+	scopedUsageQuery := LOG_DB.Model(&Log{}).
+		Select("user_id, MAX(created_at) AS last_used_at_in_scope, SUM(quota) AS used_quota_in_scope").
+		Where("type = ? AND user_id IN ? AND created_at >= ?", LogTypeConsume, userIds, filters.UsageStartAt)
+	if filters.UsageEndAt > 0 {
+		scopedUsageQuery = scopedUsageQuery.Where("created_at < ?", filters.UsageEndAt)
+	}
+	if len(filters.UsageModels) > 0 {
+		scopedUsageQuery = scopedUsageQuery.Where("model_name IN ?", filters.UsageModels)
+	}
+	err = scopedUsageQuery.
+		Group("user_id").
+		Scan(&scopedUsageRows).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	scopedUsageByUser := make(map[int]struct {
+		LastUsedAtInScope int64
+		UsedQuotaInScope  int64
+	}, len(scopedUsageRows))
+	for _, row := range scopedUsageRows {
+		scopedUsageByUser[row.UserId] = struct {
+			LastUsedAtInScope int64
+			UsedQuotaInScope  int64
+		}{LastUsedAtInScope: row.LastUsedAtInScope, UsedQuotaInScope: row.UsedQuotaInScope}
+	}
+	for _, user := range users {
+		usage := scopedUsageByUser[user.Id]
+		user.LastUsedAtInScope = usage.LastUsedAtInScope
+		user.UsedQuotaInScope = usage.UsedQuotaInScope
+	}
+	return users, total, nil
 }
 
 func ListQuotaGrantTargetIds(filters QuotaGrantTargetFilters) ([]int, error) {
@@ -178,20 +222,23 @@ func quotaGrantTargetQuery(tx *gorm.DB, filters QuotaGrantTargetFilters) (*gorm.
 		query = query.Where("quota "+operator+" ?", *filters.MaxQuota)
 	}
 	if filters.RechargeMode != "" {
-		condition := "EXISTS (SELECT 1 FROM top_ups WHERE top_ups.user_id = users.id AND top_ups.status = ? AND top_ups.credited_quota > 0)"
+		condition := "EXISTS (SELECT 1 FROM top_ups WHERE top_ups.user_id = users.id AND top_ups.status = ? AND top_ups.credited_quota > 0"
 		args := []interface{}{common.TopUpStatusSuccess}
 		switch filters.RechargeMode {
-		case "unrecharged":
-			condition = "NOT " + condition
-		case "recharged":
-		case "yesterday", "date":
-			if filters.RechargeStartAt <= 0 || filters.RechargeEndAt <= filters.RechargeStartAt {
-				return nil, errors.New("充值日期范围无效")
+		case "recharged", "unrecharged", "yesterday", "date":
+			if filters.RechargeStartAt > 0 || filters.RechargeEndAt > 0 {
+				if filters.RechargeStartAt <= 0 || filters.RechargeEndAt <= filters.RechargeStartAt {
+					return nil, errors.New("充值日期范围无效")
+				}
+				condition += " AND top_ups.complete_time >= ? AND top_ups.complete_time < ?"
+				args = append(args, filters.RechargeStartAt, filters.RechargeEndAt)
 			}
-			condition = "EXISTS (SELECT 1 FROM top_ups WHERE top_ups.user_id = users.id AND top_ups.status = ? AND top_ups.credited_quota > 0 AND top_ups.complete_time >= ? AND top_ups.complete_time < ?)"
-			args = append(args, filters.RechargeStartAt, filters.RechargeEndAt)
 		default:
 			return nil, errors.New("不支持的充值情况筛选")
+		}
+		condition += ")"
+		if filters.RechargeMode == "unrecharged" {
+			condition = "NOT " + condition
 		}
 		query = query.Where(condition, args...)
 	}
@@ -204,6 +251,10 @@ func quotaGrantTargetQuery(tx *gorm.DB, filters QuotaGrantTargetFilters) (*gorm.
 		if filters.UsageEndAt > 0 {
 			condition += " AND logs.created_at < ?"
 			args = append(args, filters.UsageEndAt)
+		}
+		if len(filters.UsageModels) > 0 {
+			condition += " AND logs.model_name IN ?"
+			args = append(args, filters.UsageModels)
 		}
 		condition += ")"
 		if filters.UsageMode == "unused" {

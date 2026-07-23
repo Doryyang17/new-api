@@ -31,62 +31,80 @@ import dayjs from '@/lib/dayjs'
 import { cn } from '@/lib/utils'
 
 interface CompactDateTimeRangePickerProps {
+  id?: string
   start?: Date
   end?: Date
   onChange: (range: { start?: Date; end?: Date }) => void
   className?: string
+  disabled?: boolean
+  timeZone?: string
 }
 
-function toInputValue(date?: Date): string {
-  return date ? dayjs(date).format('YYYY-MM-DDTHH:mm') : ''
+function toInputValue(date?: Date, timeZone?: string): string {
+  if (!date) return ''
+  const value = dayjs(date)
+  return (timeZone ? value.tz(timeZone) : value).format('YYYY-MM-DDTHH:mm')
 }
 
-function fromInputValue(value: string): Date | undefined {
+function fromInputValue(value: string, timeZone?: string): Date | undefined {
   if (!value) return undefined
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? undefined : date
+  const parsed = timeZone ? dayjs.tz(value, timeZone) : dayjs(value)
+  return parsed.isValid() ? parsed.toDate() : undefined
 }
 
-export function CompactDateTimeRangePicker({
-  start,
-  end,
-  onChange,
-  className,
-}: CompactDateTimeRangePickerProps) {
+export function CompactDateTimeRangePicker(
+  props: CompactDateTimeRangePickerProps
+) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const [draftStart, setDraftStart] = useState(toInputValue(start))
-  const [draftEnd, setDraftEnd] = useState(toInputValue(end))
+  const [draftStart, setDraftStart] = useState(
+    toInputValue(props.start, props.timeZone)
+  )
+  const [draftEnd, setDraftEnd] = useState(
+    toInputValue(props.end, props.timeZone)
+  )
 
   const label = useMemo(() => {
-    if (!start && !end) return t('Date Range')
+    if (!props.start && !props.end) return t('Date Range')
     // The popover's <input type="datetime-local"> only supports minute
     // precision, so seconds are always 00 (manual pick) or 59 (preset
     // end-of-day). Hide them in the trigger label to keep the button
     // width compact while still showing the meaningful timestamp.
-    const startText = start ? dayjs(start).format('YYYY-MM-DD HH:mm') : '-'
-    const endText = end ? dayjs(end).format('YYYY-MM-DD HH:mm') : '-'
+    const startValue = props.start ? dayjs(props.start) : null
+    const endValue = props.end ? dayjs(props.end) : null
+    const startText = startValue
+      ? (props.timeZone ? startValue.tz(props.timeZone) : startValue).format(
+          'YYYY-MM-DD HH:mm'
+        )
+      : '-'
+    const endText = endValue
+      ? (props.timeZone ? endValue.tz(props.timeZone) : endValue).format(
+          'YYYY-MM-DD HH:mm'
+        )
+      : '-'
     return `${startText} ~ ${endText}`
-  }, [end, start, t])
+  }, [props.end, props.start, props.timeZone, t])
 
   const handleOpenChange = (nextOpen: boolean) => {
+    if (props.disabled && nextOpen) return
     if (nextOpen) {
-      setDraftStart(toInputValue(start))
-      setDraftEnd(toInputValue(end))
+      setDraftStart(toInputValue(props.start, props.timeZone))
+      setDraftEnd(toInputValue(props.end, props.timeZone))
     }
     setOpen(nextOpen)
   }
 
   const applyDraft = () => {
-    onChange({
-      start: fromInputValue(draftStart),
-      end: fromInputValue(draftEnd),
+    props.onChange({
+      start: fromInputValue(draftStart, props.timeZone),
+      end: fromInputValue(draftEnd, props.timeZone),
     })
     setOpen(false)
   }
 
   const applyPreset = (kind: 'today' | '7d' | 'week' | '30d' | 'month') => {
-    const now = dayjs()
+    const localNow = dayjs()
+    const now = props.timeZone ? localNow.tz(props.timeZone) : localNow
     const presets = {
       today: {
         start: now.startOf('day').toDate(),
@@ -110,9 +128,9 @@ export function CompactDateTimeRangePicker({
       },
     }
     const range = presets[kind]
-    setDraftStart(toInputValue(range.start))
-    setDraftEnd(toInputValue(range.end))
-    onChange(range)
+    setDraftStart(toInputValue(range.start, props.timeZone))
+    setDraftEnd(toInputValue(range.end, props.timeZone))
+    props.onChange(range)
     setOpen(false)
   }
 
@@ -121,12 +139,14 @@ export function CompactDateTimeRangePicker({
       <PopoverTrigger
         render={
           <Button
+            id={props.id}
             type='button'
             variant='outline'
+            disabled={props.disabled}
             className={cn(
               'w-full justify-start gap-2 px-2.5 text-sm leading-5 font-normal tabular-nums',
-              !start && !end && 'text-muted-foreground',
-              className
+              !props.start && !props.end && 'text-muted-foreground',
+              props.className
             )}
           />
         }
@@ -147,6 +167,7 @@ export function CompactDateTimeRangePicker({
               <Input
                 type='datetime-local'
                 value={draftStart}
+                disabled={props.disabled}
                 onChange={(e) => setDraftStart(e.target.value)}
                 className='h-8 text-sm leading-5 tabular-nums'
               />
@@ -161,6 +182,7 @@ export function CompactDateTimeRangePicker({
               <Input
                 type='datetime-local'
                 value={draftEnd}
+                disabled={props.disabled}
                 onChange={(e) => setDraftEnd(e.target.value)}
                 className='h-8 text-sm leading-5 tabular-nums'
               />
@@ -172,6 +194,7 @@ export function CompactDateTimeRangePicker({
               type='button'
               variant='secondary'
               size='sm'
+              disabled={props.disabled}
               className='h-7 flex-1 px-2 text-xs'
               onClick={() => applyPreset('today')}
             >
@@ -181,6 +204,7 @@ export function CompactDateTimeRangePicker({
               type='button'
               variant='secondary'
               size='sm'
+              disabled={props.disabled}
               className='h-7 flex-1 px-2 text-xs'
               onClick={() => applyPreset('7d')}
             >
@@ -190,6 +214,7 @@ export function CompactDateTimeRangePicker({
               type='button'
               variant='secondary'
               size='sm'
+              disabled={props.disabled}
               className='h-7 flex-1 px-2 text-xs'
               onClick={() => applyPreset('week')}
             >
@@ -199,6 +224,7 @@ export function CompactDateTimeRangePicker({
               type='button'
               variant='secondary'
               size='sm'
+              disabled={props.disabled}
               className='h-7 flex-1 px-2 text-xs'
               onClick={() => applyPreset('30d')}
             >
@@ -208,6 +234,7 @@ export function CompactDateTimeRangePicker({
               type='button'
               variant='secondary'
               size='sm'
+              disabled={props.disabled}
               className='h-7 flex-1 px-2 text-xs'
               onClick={() => applyPreset('month')}
             >
@@ -216,7 +243,13 @@ export function CompactDateTimeRangePicker({
           </div>
 
           <div className='flex justify-end'>
-            <Button size='sm' className='h-8' onClick={applyDraft}>
+            <Button
+              type='button'
+              size='sm'
+              className='h-8'
+              disabled={props.disabled}
+              onClick={applyDraft}
+            >
               {t('Confirm')}
             </Button>
           </div>

@@ -25,10 +25,11 @@ export type QuotaGrantFilters = {
   balance_mode: string
   balance_amount: string
   balance_max: string
+  time_start_at: number
+  time_end_at: number
   recharge_mode: string
-  recharge_date: string
   usage_mode: string
-  usage_period: string
+  usage_models: string[]
 }
 
 export type QuotaGrantTarget = {
@@ -42,7 +43,9 @@ export type QuotaGrantTarget = {
   group: string
   created_at: number
   last_used_at: number
+  last_used_at_in_scope: number
   used_quota_7d: number
+  used_quota_in_scope: number
 }
 
 export type QuotaGrantTargetPage = {
@@ -76,43 +79,22 @@ export type QuotaGrantBatchResult = {
   cache_sync_pending: boolean
 }
 
-function quotaGrantFilterParams(filters: QuotaGrantFilters) {
-  return {
-    keyword: filters.keyword,
-    roles: filters.roles.join(','),
-    statuses: filters.statuses.join(','),
-    balance_mode: filters.balance_mode,
-    balance_amount: filters.balance_amount,
-    balance_max: filters.balance_max,
-    recharge_mode: filters.recharge_mode,
-    recharge_date: filters.recharge_date,
-    usage_mode: filters.usage_mode,
-    usage_period: filters.usage_period,
-  }
-}
-
 export async function listQuotaGrantTargets(
   filters: QuotaGrantFilters,
   page: number,
   pageSize: number
 ) {
-  const response = await api.get<ApiResponse<QuotaGrantTargetPage>>(
-    '/api/user/quota-grants/targets',
-    {
-      params: {
-        ...quotaGrantFilterParams(filters),
-        p: page,
-        page_size: pageSize,
-      },
-    }
+  const response = await api.post<ApiResponse<QuotaGrantTargetPage>>(
+    '/api/user/quota-grants/targets/search',
+    { filters, page, page_size: pageSize }
   )
   return response.data
 }
 
 export async function listQuotaGrantTargetIds(filters: QuotaGrantFilters) {
-  const response = await api.get<ApiResponse<{ ids: number[] }>>(
-    '/api/user/quota-grants/targets/ids',
-    { params: quotaGrantFilterParams(filters) }
+  const response = await api.post<ApiResponse<{ ids: number[] }>>(
+    '/api/user/quota-grants/targets/ids/search',
+    { filters }
   )
   return response.data
 }

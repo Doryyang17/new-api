@@ -331,6 +331,11 @@ func TestListQuotaGrantTargetsFiltersBySuccessfulWalletRecharge(t *testing.T) {
 	ids, err = ListQuotaGrantTargetIds(baseFilters)
 	require.NoError(t, err)
 	assert.Equal(t, []int{30}, ids)
+
+	baseFilters.RechargeMode = "recharged"
+	ids, err = ListQuotaGrantTargetIds(baseFilters)
+	require.NoError(t, err)
+	assert.Equal(t, []int{30}, ids)
 }
 
 func TestListQuotaGrantTargetsAppliesBalanceUsageAndStatusIntersection(t *testing.T) {
@@ -366,7 +371,7 @@ func TestListQuotaGrantTargetsAppliesBalanceUsageAndStatusIntersection(t *testin
 	require.Len(t, targets, 1)
 	assert.Equal(t, 33, targets[0].Id)
 	assert.Equal(t, now-2*24*60*60, targets[0].LastUsedAt)
-	assert.EqualValues(t, 120, targets[0].UsedQuota7d)
+	assert.EqualValues(t, 120, targets[0].UsedQuotaInScope)
 
 	ids, err := ListQuotaGrantTargetIds(filters)
 	require.NoError(t, err)
@@ -432,7 +437,54 @@ func TestListQuotaGrantTargetsLimitsRecentUsageStatisticsToThirtyDays(t *testing
 	assert.EqualValues(t, 1, total)
 	require.Len(t, targets, 1)
 	assert.Zero(t, targets[0].LastUsedAt)
-	assert.Zero(t, targets[0].UsedQuota7d)
+	assert.Zero(t, targets[0].UsedQuotaInScope)
+}
+
+func TestListQuotaGrantTargetsFiltersUsageByModelAndRange(t *testing.T) {
+	truncateTables(t)
+	users := []*User{
+		{Id: 61, Username: "grant-model-match", Password: "password123", AffCode: "grant-model-match", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
+		{Id: 62, Username: "grant-other-model", Password: "password123", AffCode: "grant-other-model", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
+		{Id: 63, Username: "grant-before-range", Password: "password123", AffCode: "grant-before-range", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
+		{Id: 64, Username: "grant-end-boundary", Password: "password123", AffCode: "grant-end-boundary", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
+		{Id: 65, Username: "grant-no-usage", Password: "password123", AffCode: "grant-no-usage", Role: common.RoleCommonUser, Status: common.UserStatusEnabled},
+	}
+	require.NoError(t, DB.CreateInBatches(&users, 20).Error)
+	const startAt int64 = 1000
+	const endAt int64 = 2000
+	require.NoError(t, LOG_DB.CreateInBatches([]*Log{
+		{UserId: 61, Username: users[0].Username, CreatedAt: 1500, Type: LogTypeConsume, ModelName: "gpt-4o", Quota: 120},
+		{UserId: 61, Username: users[0].Username, CreatedAt: 1700, Type: LogTypeConsume, ModelName: "other-model", Quota: 500},
+		{UserId: 62, Username: users[1].Username, CreatedAt: 1500, Type: LogTypeConsume, ModelName: "gpt-4", Quota: 240},
+		{UserId: 63, Username: users[2].Username, CreatedAt: startAt - 1, Type: LogTypeConsume, ModelName: "gpt-4o", Quota: 360},
+		{UserId: 64, Username: users[3].Username, CreatedAt: endAt, Type: LogTypeConsume, ModelName: "gpt-4o", Quota: 480},
+	}, 20).Error)
+
+	filters := QuotaGrantTargetFilters{
+		Roles:        []int{common.RoleCommonUser},
+		Statuses:     []int{common.UserStatusEnabled},
+		UsageMode:    "used",
+		UsageStartAt: startAt,
+		UsageEndAt:   endAt,
+		UsageModels:  []string{"gpt-4o", "gpt-4"},
+	}
+	targets, total, err := ListQuotaGrantTargets(filters, 0, 20, startAt, startAt)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
+	require.Len(t, targets, 2)
+	assert.Equal(t, 62, targets[0].Id)
+	assert.Equal(t, int64(1500), targets[0].LastUsedAt)
+	assert.Equal(t, int64(240), targets[0].UsedQuotaInScope)
+	assert.Equal(t, 61, targets[1].Id)
+	assert.Equal(t, int64(1700), targets[1].LastUsedAt)
+	assert.Equal(t, int64(1500), targets[1].LastUsedAtInScope)
+	assert.Equal(t, int64(620), targets[1].UsedQuota7d)
+	assert.Equal(t, int64(120), targets[1].UsedQuotaInScope)
+
+	filters.UsageMode = "unused"
+	ids, err := ListQuotaGrantTargetIds(filters)
+	require.NoError(t, err)
+	assert.Equal(t, []int{65, 64, 63}, ids)
 }
 
 func TestGrantUserQuotaBatchRejectsTargetsThatNoLongerMatchFilters(t *testing.T) {

@@ -135,6 +135,8 @@ func SetApiRouter(router *gin.Engine) {
 			{
 				quotaGrantRoute.GET("/targets", controller.ListQuotaGrantTargets)
 				quotaGrantRoute.GET("/targets/ids", controller.ListQuotaGrantTargetIds)
+				quotaGrantRoute.POST("/targets/search", controller.SearchQuotaGrantTargets)
+				quotaGrantRoute.POST("/targets/ids/search", controller.SearchQuotaGrantTargetIds)
 				quotaGrantRoute.POST("", controller.GrantUserQuotaBatch)
 			}
 

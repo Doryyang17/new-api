@@ -19,6 +19,10 @@ import (
 
 const maxQuotaGrantReasonLength = 200
 
+const maxQuotaGrantUsageModels = 100
+
+const maxQuotaGrantFilterSummaryLength = 500
+
 type quotaGrantRequest struct {
 	RequestId string                   `json:"request_id"`
 	UserIds   []int                    `json:"user_ids"`
@@ -28,16 +32,36 @@ type quotaGrantRequest struct {
 }
 
 type quotaGrantFilterRequest struct {
-	Keyword       string `json:"keyword"`
-	Roles         []int  `json:"roles"`
-	Statuses      []int  `json:"statuses"`
-	BalanceMode   string `json:"balance_mode"`
-	BalanceAmount string `json:"balance_amount"`
-	BalanceMax    string `json:"balance_max"`
-	RechargeMode  string `json:"recharge_mode"`
-	RechargeDate  string `json:"recharge_date"`
-	UsageMode     string `json:"usage_mode"`
-	UsagePeriod   string `json:"usage_period"`
+	Keyword       string   `json:"keyword"`
+	Roles         []int    `json:"roles"`
+	Statuses      []int    `json:"statuses"`
+	BalanceMode   string   `json:"balance_mode"`
+	BalanceAmount string   `json:"balance_amount"`
+	BalanceMax    string   `json:"balance_max"`
+	TimePeriod    string   `json:"time_period"`
+	TimeStartDate string   `json:"time_start_date"`
+	TimeEndDate   string   `json:"time_end_date"`
+	TimeStartAt   int64    `json:"time_start_at"`
+	TimeEndAt     int64    `json:"time_end_at"`
+	RechargeMode  string   `json:"recharge_mode"`
+	RechargeDate  string   `json:"recharge_date"`
+	UsageMode     string   `json:"usage_mode"`
+	UsagePeriod   string   `json:"usage_period"`
+	UsageModel    string   `json:"usage_model"`
+	UsageModels   []string `json:"usage_models"`
+}
+
+type quotaGrantTimeRange struct {
+	StartAt int64
+	EndAt   int64
+	Summary string
+	Active  bool
+}
+
+type quotaGrantTargetSearchRequest struct {
+	Filters  quotaGrantFilterRequest `json:"filters"`
+	Page     int                     `json:"page"`
+	PageSize int                     `json:"page_size"`
 }
 
 func ListQuotaGrantTargets(c *gin.Context) {
@@ -47,7 +71,36 @@ func ListQuotaGrantTargets(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	pageInfo := common.GetPageQuery(c)
+	listQuotaGrantTargets(c, filters, common.GetPageQuery(c), now)
+}
+
+func SearchQuotaGrantTargets(c *gin.Context) {
+	var request quotaGrantTargetSearchRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorMsg(c, "请求参数格式不正确")
+		return
+	}
+	now := time.Now()
+	filters, _, _, err := normalizeQuotaGrantFilters(request.Filters, now)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if request.Page < 1 {
+		request.Page = 1
+	}
+	if request.PageSize <= 0 {
+		request.PageSize = common.ItemsPerPage
+	} else if request.PageSize > 100 {
+		request.PageSize = 100
+	}
+	listQuotaGrantTargets(c, filters, &common.PageInfo{
+		Page:     request.Page,
+		PageSize: request.PageSize,
+	}, now)
+}
+
+func listQuotaGrantTargets(c *gin.Context, filters model.QuotaGrantTargetFilters, pageInfo *common.PageInfo, now time.Time) {
 	users, total, err := model.ListQuotaGrantTargets(
 		filters,
 		pageInfo.GetStartIdx(),
@@ -71,6 +124,24 @@ func ListQuotaGrantTargetIds(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	listQuotaGrantTargetIds(c, filters)
+}
+
+func SearchQuotaGrantTargetIds(c *gin.Context) {
+	var request quotaGrantTargetSearchRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorMsg(c, "请求参数格式不正确")
+		return
+	}
+	filters, _, _, err := normalizeQuotaGrantFilters(request.Filters, time.Now())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	listQuotaGrantTargetIds(c, filters)
+}
+
+func listQuotaGrantTargetIds(c *gin.Context, filters model.QuotaGrantTargetFilters) {
 	ids, err := model.ListQuotaGrantTargetIds(filters)
 	if err != nil {
 		common.ApiError(c, err)
@@ -218,6 +289,14 @@ func quotaGrantFiltersFromQuery(c *gin.Context, now time.Time) (model.QuotaGrant
 	if err != nil {
 		return model.QuotaGrantTargetFilters{}, "", "", err
 	}
+	timeStartAt, err := parseQuotaGrantTimestamp(c.Query("time_start_at"), "行为时间开始")
+	if err != nil {
+		return model.QuotaGrantTargetFilters{}, "", "", err
+	}
+	timeEndAt, err := parseQuotaGrantTimestamp(c.Query("time_end_at"), "行为时间结束")
+	if err != nil {
+		return model.QuotaGrantTargetFilters{}, "", "", err
+	}
 	return normalizeQuotaGrantFilters(quotaGrantFilterRequest{
 		Keyword:       c.Query("keyword"),
 		Roles:         roles,
@@ -225,10 +304,17 @@ func quotaGrantFiltersFromQuery(c *gin.Context, now time.Time) (model.QuotaGrant
 		BalanceMode:   c.Query("balance_mode"),
 		BalanceAmount: c.Query("balance_amount"),
 		BalanceMax:    c.Query("balance_max"),
+		TimePeriod:    c.Query("time_period"),
+		TimeStartDate: c.Query("time_start_date"),
+		TimeEndDate:   c.Query("time_end_date"),
+		TimeStartAt:   timeStartAt,
+		TimeEndAt:     timeEndAt,
 		RechargeMode:  c.Query("recharge_mode"),
 		RechargeDate:  c.Query("recharge_date"),
 		UsageMode:     c.Query("usage_mode"),
 		UsagePeriod:   c.Query("usage_period"),
+		UsageModel:    c.Query("usage_model"),
+		UsageModels:   splitQuotaGrantUsageModels(c.Query("usage_models")),
 	}, now)
 }
 
@@ -277,17 +363,29 @@ func normalizeQuotaGrantFilters(request quotaGrantFilterRequest, now time.Time) 
 		summary = append(summary, balanceSummary)
 	}
 
-	rechargeSummary, err := applyQuotaGrantRechargeFilter(&filters, request, now)
+	timeRange, err := normalizeQuotaGrantTimeRange(request, now)
 	if err != nil {
 		return model.QuotaGrantTargetFilters{}, "", "", err
+	}
+
+	rechargeSummary, err := applyQuotaGrantRechargeFilter(&filters, request, now, timeRange)
+	if err != nil {
+		return model.QuotaGrantTargetFilters{}, "", "", err
+	}
+
+	usageSummary, err := applyQuotaGrantUsageFilter(&filters, request, now, timeRange)
+	if err != nil {
+		return model.QuotaGrantTargetFilters{}, "", "", err
+	}
+	rechargeMode := strings.TrimSpace(request.RechargeMode)
+	usageMode := strings.TrimSpace(request.UsageMode)
+	usesSharedTimeRange := timeRange.Active && ((rechargeMode == "recharged" || rechargeMode == "unrecharged") ||
+		(usageMode == "used" || usageMode == "unused"))
+	if usesSharedTimeRange {
+		summary = append(summary, timeRange.Summary)
 	}
 	if rechargeSummary != "" {
 		summary = append(summary, rechargeSummary)
-	}
-
-	usageSummary, err := applyQuotaGrantUsageFilter(&filters, request, now)
-	if err != nil {
-		return model.QuotaGrantTargetFilters{}, "", "", err
 	}
 	if usageSummary != "" {
 		summary = append(summary, usageSummary)
@@ -300,7 +398,7 @@ func normalizeQuotaGrantFilters(request quotaGrantFilterRequest, now time.Time) 
 	if err != nil {
 		return model.QuotaGrantTargetFilters{}, "", "", err
 	}
-	return filters, string(filterBytes), strings.Join(summary, "；"), nil
+	return filters, string(filterBytes), truncateQuotaGrantFilterSummary(strings.Join(summary, "；")), nil
 }
 
 func applyQuotaGrantBalanceFilter(filters *model.QuotaGrantTargetFilters, request quotaGrantFilterRequest) (string, error) {
@@ -365,7 +463,81 @@ func applyQuotaGrantBalanceFilter(filters *model.QuotaGrantTargetFilters, reques
 	}
 }
 
-func applyQuotaGrantRechargeFilter(filters *model.QuotaGrantTargetFilters, request quotaGrantFilterRequest, now time.Time) (string, error) {
+func normalizeQuotaGrantTimeRange(request quotaGrantFilterRequest, now time.Time) (quotaGrantTimeRange, error) {
+	if request.TimeStartAt != 0 || request.TimeEndAt != 0 {
+		if request.TimeStartAt <= 0 || request.TimeEndAt <= 0 {
+			return quotaGrantTimeRange{}, errors.New("请选择完整的行为时间范围")
+		}
+		if request.TimeEndAt < request.TimeStartAt {
+			return quotaGrantTimeRange{}, errors.New("行为时间范围结束时间不能早于开始时间")
+		}
+		if request.TimeEndAt == 1<<63-1 {
+			return quotaGrantTimeRange{}, errors.New("行为时间范围超出系统支持范围")
+		}
+		location, err := time.LoadLocation("Asia/Shanghai")
+		if err != nil {
+			return quotaGrantTimeRange{}, err
+		}
+		start := time.Unix(request.TimeStartAt, 0).In(location)
+		end := time.Unix(request.TimeEndAt, 0).In(location)
+		return quotaGrantTimeRange{
+			StartAt: request.TimeStartAt,
+			// The usage-log picker treats its end timestamp as inclusive. Keep
+			// the same contract while the model query remains half-open.
+			EndAt:   request.TimeEndAt + 1,
+			Summary: fmt.Sprintf("行为时间：%s 至 %s（北京时间）", start.Format("2006-01-02 15:04"), end.Format("2006-01-02 15:04")),
+			Active:  true,
+		}, nil
+	}
+	period := strings.TrimSpace(request.TimePeriod)
+	if period == "" {
+		return quotaGrantTimeRange{}, nil
+	}
+
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return quotaGrantTimeRange{}, err
+	}
+	localNow := now.In(location)
+	today := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
+	tomorrow := today.AddDate(0, 0, 1)
+	rangeValue := quotaGrantTimeRange{EndAt: tomorrow.Unix(), Active: true}
+	switch period {
+	case "today":
+		rangeValue.StartAt = today.Unix()
+		rangeValue.Summary = "行为时间：今日（北京时间）"
+	case "yesterday":
+		rangeValue.StartAt = today.AddDate(0, 0, -1).Unix()
+		rangeValue.EndAt = today.Unix()
+		rangeValue.Summary = "行为时间：昨日（北京时间）"
+	case "3d", "7d", "30d":
+		days, parseErr := strconv.Atoi(strings.TrimSuffix(period, "d"))
+		if parseErr != nil {
+			return quotaGrantTimeRange{}, errors.New("不支持的行为时间范围")
+		}
+		rangeValue.StartAt = today.AddDate(0, 0, -(days - 1)).Unix()
+		rangeValue.Summary = fmt.Sprintf("行为时间：近%d个自然日（北京时间）", days)
+	case "custom":
+		startDate := strings.TrimSpace(request.TimeStartDate)
+		endDate := strings.TrimSpace(request.TimeEndDate)
+		start, startErr := time.ParseInLocation("2006-01-02", startDate, location)
+		end, endErr := time.ParseInLocation("2006-01-02", endDate, location)
+		if startErr != nil || endErr != nil || start.Format("2006-01-02") != startDate || end.Format("2006-01-02") != endDate {
+			return quotaGrantTimeRange{}, errors.New("自定义行为时间范围格式不正确")
+		}
+		if end.Before(start) {
+			return quotaGrantTimeRange{}, errors.New("行为时间范围结束日期不能早于开始日期")
+		}
+		rangeValue.StartAt = start.Unix()
+		rangeValue.EndAt = end.AddDate(0, 0, 1).Unix()
+		rangeValue.Summary = fmt.Sprintf("行为时间：%s 至 %s（北京时间）", startDate, endDate)
+	default:
+		return quotaGrantTimeRange{}, errors.New("不支持的行为时间范围")
+	}
+	return rangeValue, nil
+}
+
+func applyQuotaGrantRechargeFilter(filters *model.QuotaGrantTargetFilters, request quotaGrantFilterRequest, now time.Time, timeRange quotaGrantTimeRange) (string, error) {
 	mode := strings.TrimSpace(request.RechargeMode)
 	if mode == "" || mode == "any" {
 		return "", nil
@@ -375,9 +547,17 @@ func applyQuotaGrantRechargeFilter(filters *model.QuotaGrantTargetFilters, reque
 	}
 	filters.RechargeMode = mode
 	if mode == "recharged" {
+		if timeRange.Active {
+			filters.RechargeStartAt, filters.RechargeEndAt = timeRange.StartAt, timeRange.EndAt
+			return "范围内有充值", nil
+		}
 		return "已充值", nil
 	}
 	if mode == "unrecharged" {
+		if timeRange.Active {
+			filters.RechargeStartAt, filters.RechargeEndAt = timeRange.StartAt, timeRange.EndAt
+			return "范围内无充值", nil
+		}
 		return "未充值", nil
 	}
 	startAt, endAt, dateLabel, err := quotaGrantRechargeDateWindow(mode, request.RechargeDate, now)
@@ -412,18 +592,26 @@ func quotaGrantRechargeDateWindow(mode string, rawDate string, now time.Time) (i
 	return parsed.Unix(), parsed.AddDate(0, 0, 1).Unix(), dateValue, nil
 }
 
-func applyQuotaGrantUsageFilter(filters *model.QuotaGrantTargetFilters, request quotaGrantFilterRequest, now time.Time) (string, error) {
+func applyQuotaGrantUsageFilter(filters *model.QuotaGrantTargetFilters, request quotaGrantFilterRequest, now time.Time, timeRange quotaGrantTimeRange) (string, error) {
 	mode := strings.TrimSpace(request.UsageMode)
+	usageModels, err := normalizeQuotaGrantUsageModels(request)
+	if err != nil {
+		return "", err
+	}
 	if mode == "" || mode == "any" {
+		if len(usageModels) > 0 {
+			return "", errors.New("按模型筛选前请先选择使用情况")
+		}
 		return "", nil
 	}
 	if mode != "used" && mode != "unused" {
 		return "", errors.New("不支持的使用情况筛选")
 	}
-	period := strings.TrimSpace(request.UsagePeriod)
 	var startAt, endAt int64
 	var label string
-	if period == "yesterday" {
+	if timeRange.Active {
+		startAt, endAt, label = timeRange.StartAt, timeRange.EndAt, "范围内"
+	} else if period := strings.TrimSpace(request.UsagePeriod); period == "yesterday" {
 		location, err := time.LoadLocation("Asia/Shanghai")
 		if err != nil {
 			return "", err
@@ -432,6 +620,7 @@ func applyQuotaGrantUsageFilter(filters *model.QuotaGrantTargetFilters, request 
 		today := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
 		startAt, endAt, label = today.AddDate(0, 0, -1).Unix(), today.Unix(), "昨日"
 	} else {
+		period := strings.TrimSpace(request.UsagePeriod)
 		days, err := strconv.Atoi(strings.TrimSuffix(period, "d"))
 		if err != nil || (days != 3 && days != 7 && days != 30) {
 			return "", errors.New("不支持的使用时间范围")
@@ -439,10 +628,76 @@ func applyQuotaGrantUsageFilter(filters *model.QuotaGrantTargetFilters, request 
 		startAt, label = now.Add(-time.Duration(days)*24*time.Hour).Unix(), fmt.Sprintf("近%d天", days)
 	}
 	filters.UsageMode, filters.UsageStartAt, filters.UsageEndAt = mode, startAt, endAt
+	filters.UsageModels = usageModels
+	if len(filters.UsageModels) > 0 {
+		modelLabel := quotaGrantUsageModelsLabel(filters.UsageModels)
+		if mode == "unused" {
+			return label + "未使用任一模型：" + modelLabel, nil
+		}
+		return label + "使用过任一模型：" + modelLabel, nil
+	}
 	if mode == "unused" {
 		return label + "无模型消耗", nil
 	}
 	return label + "有模型消耗", nil
+}
+
+func normalizeQuotaGrantUsageModels(request quotaGrantFilterRequest) ([]string, error) {
+	rawModelCount := len(request.UsageModels)
+	if utf8.RuneCountInString(request.UsageModel) > 100 {
+		return nil, errors.New("单个使用模型名称不能超过 100 个字符")
+	}
+	legacyModel := strings.TrimSpace(request.UsageModel)
+	if legacyModel != "" {
+		rawModelCount++
+	}
+	if rawModelCount > maxQuotaGrantUsageModels {
+		return nil, fmt.Errorf("使用模型最多选择 %d 个", maxQuotaGrantUsageModels)
+	}
+
+	rawModels := make([]string, 0, rawModelCount)
+	rawModels = append(rawModels, request.UsageModels...)
+	if legacyModel != "" {
+		rawModels = append(rawModels, legacyModel)
+	}
+	models := make([]string, 0, len(rawModels))
+	seen := make(map[string]struct{}, len(rawModels))
+	for _, rawModel := range rawModels {
+		if utf8.RuneCountInString(rawModel) > 100 {
+			return nil, errors.New("单个使用模型名称不能超过 100 个字符")
+		}
+		modelName := strings.TrimSpace(rawModel)
+		if modelName == "" {
+			continue
+		}
+		modelName = model.NormalizeUsageModelName(modelName)
+		if _, exists := seen[modelName]; exists {
+			continue
+		}
+		seen[modelName] = struct{}{}
+		models = append(models, modelName)
+	}
+	return models, nil
+}
+
+func truncateQuotaGrantFilterSummary(summary string) string {
+	if utf8.RuneCountInString(summary) <= maxQuotaGrantFilterSummaryLength {
+		return summary
+	}
+	runes := []rune(summary)
+	return string(runes[:maxQuotaGrantFilterSummaryLength-1]) + "…"
+}
+
+func quotaGrantUsageModelsLabel(models []string) string {
+	visibleModels := models
+	if len(visibleModels) > 3 {
+		visibleModels = visibleModels[:3]
+	}
+	label := strings.Join(visibleModels, "、")
+	if len(models) <= len(visibleModels) {
+		return label
+	}
+	return fmt.Sprintf("%s 等 %d 个模型", label, len(models))
 }
 
 func quotaGrantBalanceFromUSD(raw string) (int, string, error) {
@@ -506,4 +761,24 @@ func parseQuotaGrantFilter(raw string, defaults []int, allowed map[int]struct{},
 		return nil, fmt.Errorf("请至少选择一个%s", label)
 	}
 	return values, nil
+}
+
+func parseQuotaGrantTimestamp(raw string, label string) (int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s时间戳格式不正确", label)
+	}
+	return value, nil
+}
+
+func splitQuotaGrantUsageModels(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, ",")
 }
