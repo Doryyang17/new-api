@@ -53,6 +53,17 @@ func main() {
 		return
 	}
 
+	defer func() {
+		err := model.CloseDB()
+		if err != nil {
+			common.FatalLog("failed to close database: " + err.Error())
+		}
+	}()
+	if *common.MigrateLogQueryIndexes {
+		common.SysLog("usage-log query index migration completed")
+		return
+	}
+
 	common.SysLog("New API " + common.Version + " started")
 	if os.Getenv("GIN_MODE") != "debug" {
 		gin.SetMode(gin.ReleaseMode)
@@ -60,13 +71,6 @@ func main() {
 	if common.DebugEnabled {
 		common.SysLog("running in debug mode")
 	}
-
-	defer func() {
-		err := model.CloseDB()
-		if err != nil {
-			common.FatalLog("failed to close database: " + err.Error())
-		}
-	}()
 
 	if common.RedisEnabled {
 		// for compatibility with old versions
@@ -292,6 +296,15 @@ func InitResources() error {
 	common.InitEnv()
 
 	logger.SetupLogger()
+	if *common.MigrateLogQueryIndexes {
+		if err = model.InitDBConnectionOnly(); err != nil {
+			return err
+		}
+		if err = model.InitLogDBConnectionOnly(); err != nil {
+			return err
+		}
+		return model.MigrateLogQueryIndexes()
+	}
 
 	// Initialize model settings
 	ratio_setting.InitRatioSettings()

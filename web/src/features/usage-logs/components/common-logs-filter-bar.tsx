@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQueryClient, useIsFetching } from '@tanstack/react-query'
+import { useIsFetching, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
 import { Eye, EyeOff } from 'lucide-react'
@@ -41,7 +41,7 @@ import {
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
-import type { CommonLogFilters } from '../types'
+import type { CommonLogFilters, LogStatistics } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
 import {
@@ -107,6 +107,9 @@ function buildSearchSourceKey(values: {
 
 interface CommonLogsFilterBarProps<TData> {
   table: Table<TData>
+  stats?: LogStatistics
+  statsLoading: boolean
+  statsError?: boolean
 }
 
 export function CommonLogsFilterBar<TData>(
@@ -187,18 +190,44 @@ export function CommonLogsFilterBar<TData>(
 
   const handleApply = useCallback(() => {
     const filterParams = buildSearchParams(filters, 'common')
+    const targetSearch = {
+      ...filterParams,
+      type: [logType],
+      page: 1,
+      pageSize: searchParams.pageSize,
+    }
+    const isSameSearch =
+      (searchParams.page ?? 1) === 1 &&
+      buildSearchSourceKey(targetSearch) === searchState.sourceKey
     navigate({
       to: '/usage-logs/$section',
       params: { section: 'common' },
-      search: {
-        ...filterParams,
-        type: [logType],
-        page: 1,
-      },
+      search: targetSearch,
     })
-    queryClient.invalidateQueries({ queryKey: ['logs'] })
-    queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
-  }, [filters, logType, navigate, queryClient])
+    if (isSameSearch) {
+      void queryClient.refetchQueries({
+        queryKey: ['logs', 'common', isAdmin],
+        type: 'active',
+      })
+      void queryClient.refetchQueries({
+        queryKey: ['usage-logs-stats', isAdmin],
+        type: 'active',
+      })
+      void queryClient.refetchQueries({
+        queryKey: ['usage-logs-count-fallback', isAdmin],
+        type: 'active',
+      })
+    }
+  }, [
+    filters,
+    isAdmin,
+    logType,
+    navigate,
+    queryClient,
+    searchParams.page,
+    searchParams.pageSize,
+    searchState.sourceKey,
+  ])
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
@@ -222,9 +251,7 @@ export function CommonLogsFilterBar<TData>(
         ...resetSearch,
       },
     })
-    queryClient.invalidateQueries({ queryKey: ['logs'] })
-    queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
-  }, [navigate, queryClient])
+  }, [navigate])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -265,7 +292,11 @@ export function CommonLogsFilterBar<TData>(
 
   const statsBar = (
     <div className='flex flex-wrap items-center gap-2'>
-      <CommonLogsStats />
+      <CommonLogsStats
+        stats={props.stats}
+        isLoading={props.statsLoading}
+        isError={props.statsError}
+      />
     </div>
   )
   const sensitiveToggle = (

@@ -1,3 +1,4 @@
+import { AlertTriangle } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -16,20 +17,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
-import { getRouteApi } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatLogQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { getLogStats, getUserLogStats } from '../api'
 import { DEFAULT_LOG_STATS } from '../constants'
-import { buildApiParams } from '../lib/utils'
-import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
-
-const route = getRouteApi('/_authenticated/usage-logs/$section')
+import type { LogStatistics } from '../types'
+import { useUsageLogsContext } from './usage-logs-provider'
 
 function StatBadge(props: {
   label: string
@@ -47,35 +43,26 @@ function StatBadge(props: {
   )
 }
 
-export function CommonLogsStats() {
+export function CommonLogsStats(props: {
+  stats?: LogStatistics
+  isLoading: boolean
+  isError?: boolean
+}) {
   const { t } = useTranslation()
-  const { isAdminView: isAdmin } = useLogsViewScope()
-  const searchParams = route.useSearch()
   const { sensitiveVisible } = useUsageLogsContext()
 
-  const { data: stats, isLoading } = useQuery({
-    queryKey: ['usage-logs-stats', isAdmin, searchParams],
-    queryFn: async () => {
-      const params = buildApiParams({
-        page: 1,
-        pageSize: 1,
-        searchParams,
-        columnFilters: [],
-        isAdmin,
-      })
+  const stats = props.stats || DEFAULT_LOG_STATS
 
-      const result = isAdmin
-        ? await getLogStats(params)
-        : await getUserLogStats(params)
+  if (props.isError) {
+    return (
+      <span className='text-destructive inline-flex h-7 items-center gap-1.5 px-1 text-xs'>
+        <AlertTriangle className='size-3.5' aria-hidden='true' />
+        {t('统计数据加载失败，请重新查询')}
+      </span>
+    )
+  }
 
-      return result.success
-        ? result.data || DEFAULT_LOG_STATS
-        : DEFAULT_LOG_STATS
-    },
-    placeholderData: (previousData) => previousData,
-  })
-
-  if (isLoading) {
+  if (props.isLoading) {
     return (
       <div className='flex items-center gap-2'>
         <Skeleton className='h-7 w-[150px] rounded-md' />

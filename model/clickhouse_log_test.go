@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestIsClickHouseDSN(t *testing.T) {
@@ -80,13 +81,14 @@ func TestClickHouseLogTTLClause(t *testing.T) {
 func TestClickHouseLogCreateTableSQL(t *testing.T) {
 	withoutTTL := clickHouseLogCreateTableSQL(0)
 	assert.Contains(t, withoutTTL, "CREATE TABLE IF NOT EXISTS logs")
+	assert.Contains(t, withoutTTL, "row_id String DEFAULT ''")
 	assert.Contains(t, withoutTTL, "ENGINE = MergeTree()")
 	assert.Contains(t, withoutTTL, "PARTITION BY toYYYYMM(toDateTime(created_at))")
-	assert.Contains(t, withoutTTL, "ORDER BY (created_at, request_id)")
+	assert.Contains(t, withoutTTL, "ORDER BY (created_at, request_id, row_id)")
 	assert.NotContains(t, withoutTTL, "TTL ")
 
 	withTTL := clickHouseLogCreateTableSQL(30)
-	assert.Contains(t, withTTL, "ORDER BY (created_at, request_id)")
+	assert.Contains(t, withTTL, "ORDER BY (created_at, request_id, row_id)")
 	assert.Contains(t, withTTL, "TTL toDateTime(created_at) + INTERVAL 30 DAY DELETE")
 }
 
@@ -108,8 +110,129 @@ func TestClickHouseCreateTableHasTTL(t *testing.T) {
 }
 
 func TestClickHouseLogOrder(t *testing.T) {
-	assert.Equal(t, "created_at desc, request_id desc", clickHouseLogOrder(""))
-	assert.Equal(t, "logs.created_at desc, logs.request_id desc", clickHouseLogOrder("logs."))
+	assert.Equal(t, "created_at desc, request_id desc, row_id desc", clickHouseLogOrder(""))
+	assert.Equal(t, "logs.created_at desc, logs.request_id desc, logs.row_id desc", clickHouseLogOrder("logs."))
+}
+
+func TestApplyLogCursorFallsBackToOffsetForClickHouse(t *testing.T) {
+	originalLogDatabaseType := common.LogDatabaseType()
+	t.Cleanup(func() {
+		common.SetLogDatabaseType(originalLogDatabaseType)
+	})
+	common.SetLogDatabaseType(common.DatabaseTypeClickHouse)
+
+	tx, applied := applyLogCursor(nil, LogListOptions{
+		CursorMode:      true,
+		CursorCreatedAt: 1,
+		CursorRequestId: "shared-request-id",
+	})
+
+	assert.Nil(t, tx)
+	assert.False(t, applied)
+}
+
+func TestApplyLogCursorUsesClickHouseRowId(t *testing.T) {
+	originalLogDatabaseType := common.LogDatabaseType()
+	t.Cleanup(func() {
+		common.SetLogDatabaseType(originalLogDatabaseType)
+	})
+	common.SetLogDatabaseType(common.DatabaseTypeClickHouse)
+
+	tx, applied := applyLogCursor(
+		LOG_DB.Session(&gorm.Session{DryRun: true}).Model(&Log{}),
+		LogListOptions{
+			CursorMode:      true,
+			CursorCreatedAt: 100,
+			CursorRequestId: "request-b",
+			CursorRowId:     "row-b",
+		},
+	)
+	require.True(t, applied)
+	statement := tx.Find(&[]Log{}).Statement
+	assert.Contains(t, statement.SQL.String(), "logs.row_id < ?")
+}
+
+func TestClickHouseLogDetailUsesUniqueRowIdAndRejectsLegacyAmbiguity(t *testing.T) {
+	truncateTables(t)
+	originalLogDatabaseType := common.LogDatabaseType()
+	t.Cleanup(func() {
+		common.SetLogDatabaseType(originalLogDatabaseType)
+	})
+	common.SetLogDatabaseType(common.DatabaseTypeClickHouse)
+
+	createdAt := common.GetTimestamp()
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt: createdAt,
+		Type:      LogTypeError,
+		ChannelId: 11,
+		RequestId: "ambiguous-clickhouse-request",
+		RowId:     "clickhouse-row-a",
+		Content:   "first",
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{
+		CreatedAt: createdAt,
+		Type:      LogTypeError,
+		ChannelId: 11,
+		RequestId: "ambiguous-clickhouse-request",
+		RowId:     "clickhouse-row-b",
+		Content:   "second",
+	}).Error)
+
+	located, err := GetAllLogDetailWithLocator(LogDetailLocator{
+		RowId: "clickhouse-row-b",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "second", located.Content)
+
+	_, err = GetAllLogDetailWithLocator(LogDetailLocator{
+		RequestId: "ambiguous-clickhouse-request",
+		CreatedAt: createdAt,
+		Type:      LogTypeError,
+		ChannelId: 11,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "不唯一")
+}
+
+func TestEnsureLogRowIdForClickHouse(t *testing.T) {
+	originalLogDatabaseType := common.LogDatabaseType()
+	t.Cleanup(func() {
+		common.SetLogDatabaseType(originalLogDatabaseType)
+	})
+	common.SetLogDatabaseType(common.DatabaseTypeClickHouse)
+
+	log := &Log{}
+	ensureLogRowId(log)
+	assert.Len(t, log.RowId, 32)
+
+	existing := &Log{RowId: "fixed-row-id"}
+	ensureLogRowId(existing)
+	assert.Equal(t, "fixed-row-id", existing.RowId)
+}
+
+func TestCompactClickHouseRowsKeepLegacyDetailsWithoutRowId(t *testing.T) {
+	originalLogDatabaseType := common.LogDatabaseType()
+	t.Cleanup(func() {
+		common.SetLogDatabaseType(originalLogDatabaseType)
+	})
+	common.SetLogDatabaseType(common.DatabaseTypeClickHouse)
+
+	legacy := &Log{
+		Other: common.MapToJsonStr(map[string]interface{}{
+			"full_text": "legacy detail",
+		}),
+	}
+	stripLargeLogListDetails([]*Log{legacy})
+	assert.Contains(t, legacy.Other, "legacy detail")
+
+	current := &Log{
+		RowId: "stable-row-id",
+		Other: common.MapToJsonStr(map[string]interface{}{
+			"full_text": "current detail",
+		}),
+	}
+	stripLargeLogListDetails([]*Log{current})
+	assert.NotContains(t, current.Other, "current detail")
 }
 
 func TestBuildLogLikeConditionUsesStandardEscape(t *testing.T) {

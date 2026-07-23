@@ -16,17 +16,22 @@ import (
 )
 
 var (
-	Port         = flag.Int("port", 3000, "the listening port")
-	PrintVersion = flag.Bool("version", false, "print version and exit")
-	PrintHelp    = flag.Bool("help", false, "print help and exit")
-	LogDir       = flag.String("log-dir", "./logs", "specify the log directory")
+	Port                   = flag.Int("port", 3000, "the listening port")
+	PrintVersion           = flag.Bool("version", false, "print version and exit")
+	PrintHelp              = flag.Bool("help", false, "print help and exit")
+	LogDir                 = flag.String("log-dir", "./logs", "specify the log directory")
+	MigrateLogQueryIndexes = flag.Bool(
+		"migrate-log-query-indexes",
+		false,
+		"create usage-log query indexes and exit",
+	)
 )
 
 func printHelp() {
 	fmt.Println("NewAPI(Based OneAPI) " + Version + " - The next-generation LLM gateway and AI asset management system supports multiple languages.")
 	fmt.Println("Original Project: OneAPI by JustSong - https://github.com/songquanpeng/one-api")
 	fmt.Println("Maintainer: QuantumNous - https://github.com/QuantumNous/new-api")
-	fmt.Println("Usage: newapi [--port <port>] [--log-dir <log directory>] [--version] [--help]")
+	fmt.Println("Usage: newapi [--port <port>] [--log-dir <log directory>] [--migrate-log-query-indexes] [--version] [--help]")
 }
 
 func InitEnv() {

@@ -3,6 +3,7 @@ package model
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -77,6 +78,133 @@ func TestGetAllLogsUsernameFilterFindsLogByUserIdWhenUsernameMissing(t *testing.
 	require.EqualValues(t, 1, total)
 	require.Len(t, logs, 1)
 	assert.Equal(t, user.Username, logs[0].Username)
+}
+
+func TestGetAllLogsWithOptionsUsesCompactCursorPage(t *testing.T) {
+	truncateTables(t)
+	now := common.GetTimestamp()
+	for i := 0; i < 2; i++ {
+		require.NoError(t, LOG_DB.Create(&Log{
+			CreatedAt: now - int64(i),
+			Type:      LogTypeError,
+			RequestId: "compact-cursor-" + string(rune('a'+i)),
+			Other: common.MapToJsonStr(map[string]interface{}{
+				"reject_reason": "prompt_filter",
+				"full_text":     "large prompt that stays out of list pages",
+			}),
+		}).Error)
+	}
+
+	logs, total, err := GetAllLogsWithOptions(
+		LogTypeError,
+		0,
+		0,
+		"",
+		"",
+		"",
+		0,
+		1,
+		0,
+		"",
+		"",
+		"",
+		LogListOptions{Compact: true, CursorMode: true},
+	)
+	require.NoError(t, err)
+	assert.Zero(t, total)
+	require.Len(t, logs, 1)
+	assert.NotZero(t, logs[0].CursorId)
+	assert.NotContains(t, logs[0].Other, "large prompt")
+
+	secondPage, _, err := GetAllLogsWithOptions(
+		LogTypeError,
+		0,
+		0,
+		"",
+		"",
+		"",
+		0,
+		1,
+		0,
+		"",
+		"",
+		"",
+		LogListOptions{
+			Compact:         true,
+			CursorMode:      true,
+			CursorCreatedAt: logs[0].CreatedAt,
+			CursorId:        logs[0].CursorId,
+		},
+	)
+	require.NoError(t, err)
+	require.Len(t, secondPage, 1)
+	assert.NotEqual(t, logs[0].CursorId, secondPage[0].CursorId)
+}
+
+func TestGetAllLogsWithOptionsOmitsOversizedOtherUntilDetail(t *testing.T) {
+	truncateTables(t)
+	largeOther := common.MapToJsonStr(map[string]interface{}{
+		"opaque_detail": strings.Repeat("x", compactLogOtherMaxLength+1),
+	})
+	log := &Log{
+		CreatedAt: common.GetTimestamp(),
+		Type:      LogTypeError,
+		RequestId: "oversized-compact-detail",
+		Other:     largeOther,
+	}
+	require.NoError(t, LOG_DB.Create(log).Error)
+
+	logs, _, err := GetAllLogsWithOptions(
+		LogTypeError,
+		0,
+		0,
+		"",
+		"",
+		"",
+		0,
+		1,
+		0,
+		"",
+		"",
+		"",
+		LogListOptions{Compact: true},
+	)
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	assert.Empty(t, logs[0].Other)
+
+	detail, err := GetAllLogDetail(log.Id, log.RequestId, log.CreatedAt)
+	require.NoError(t, err)
+	assert.Equal(t, largeOther, detail.Other)
+}
+
+func TestGetUserLogDetailEnforcesOwnerAndStripsAdminFields(t *testing.T) {
+	truncateTables(t)
+	users := []User{
+		{Username: "detail-owner", AffCode: "detail-owner", Status: common.UserStatusEnabled},
+		{Username: "detail-other", AffCode: "detail-other", Status: common.UserStatusEnabled},
+	}
+	require.NoError(t, DB.Create(&users).Error)
+	log := &Log{
+		UserId:    users[1].Id,
+		CreatedAt: common.GetTimestamp(),
+		Type:      LogTypeError,
+		Content:   "private detail",
+		Other: common.MapToJsonStr(map[string]interface{}{
+			"reject_reason": "prompt_filter",
+			"admin_info":    map[string]interface{}{"secret": "hidden"},
+			"full_text":     "large private prompt",
+		}),
+	}
+	require.NoError(t, LOG_DB.Create(log).Error)
+
+	_, err := GetUserLogDetail(users[0].Id, log.Id, log.RequestId, log.CreatedAt)
+	require.Error(t, err)
+
+	detail, err := GetUserLogDetail(users[1].Id, log.Id, log.RequestId, log.CreatedAt)
+	require.NoError(t, err)
+	assert.NotContains(t, detail.Other, "secret")
+	assert.NotContains(t, detail.Other, "large private prompt")
 }
 
 func TestRecordRequestGuardLogKeepsObservationAdminOnly(t *testing.T) {

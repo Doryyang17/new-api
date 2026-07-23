@@ -835,12 +835,14 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             >
               {detailPreview}
             </button>
-            <DetailsDialog
-              log={log}
-              isAdmin={isAdmin}
-              open={dialogOpen}
-              onOpenChange={setDialogOpen}
-            />
+            {dialogOpen && (
+              <DetailsDialog
+                log={log}
+                isAdmin={isAdmin}
+                open={dialogOpen}
+                onOpenChange={setDialogOpen}
+              />
+            )}
           </>
         )
       },

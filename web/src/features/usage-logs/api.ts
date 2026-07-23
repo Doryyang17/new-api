@@ -18,7 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import { buildQueryParams } from './lib/utils'
+import type { UsageLog } from './data/schema'
+import { buildQueryParams } from './lib/query-params'
 import type {
   GetLogsParams,
   GetLogsResponse,
@@ -83,6 +84,34 @@ export const getLogStats = (params: GetLogStatsParams = {}) =>
 export const getUserLogStats = (
   params: Omit<GetLogStatsParams, 'username' | 'channel'> = {}
 ) => fetchLogStats('/api/log', params, false)
+
+export async function getLogDetail(
+  log: Pick<
+    UsageLog,
+    | 'id'
+    | 'row_id'
+    | 'cursor_id'
+    | 'created_at'
+    | 'request_id'
+    | 'type'
+    | 'channel'
+    | 'upstream_request_id'
+  >,
+  isAdmin: boolean
+): Promise<{ success: boolean; message?: string; data?: UsageLog }> {
+  const queryParams = buildQueryParams({
+    log_id: log.cursor_id || log.id,
+    row_id: log.row_id,
+    request_id: log.request_id,
+    created_at: log.created_at,
+    type: log.type,
+    channel: log.channel,
+    upstream_request_id: log.upstream_request_id,
+  })
+  const path = isAdmin ? '/api/log/detail' : '/api/log/self/detail'
+  const res = await api.get(`${path}?${queryParams}`)
+  return res.data
+}
 
 export async function getUserInfo(
   userId: number

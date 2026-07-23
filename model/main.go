@@ -178,7 +178,15 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 	return db, common.DatabaseTypeSQLite, err
 }
 
-func InitDB() (err error) {
+func InitDB() error {
+	return initDB(true)
+}
+
+func InitDBConnectionOnly() error {
+	return initDB(false)
+}
+
+func initDB(runMigrations bool) (err error) {
 	db, dbType, err := chooseDB("SQL_DSN", false)
 	if err == nil {
 		common.SetMainDatabaseType(dbType)
@@ -204,7 +212,7 @@ func InitDB() (err error) {
 		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
 
-		if !common.IsMasterNode {
+		if !runMigrations || !common.IsMasterNode {
 			return nil
 		}
 		if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
@@ -219,7 +227,15 @@ func InitDB() (err error) {
 	return err
 }
 
-func InitLogDB() (err error) {
+func InitLogDB() error {
+	return initLogDB(true)
+}
+
+func InitLogDBConnectionOnly() error {
+	return initLogDB(false)
+}
+
+func initLogDB(runMigrations bool) (err error) {
 	if os.Getenv("LOG_SQL_DSN") == "" {
 		LOG_DB = DB
 		common.SetLogDatabaseType(common.MainDatabaseType())
@@ -248,7 +264,7 @@ func InitLogDB() (err error) {
 		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
 
-		if !common.IsMasterNode {
+		if !runMigrations || !common.IsMasterNode {
 			return nil
 		}
 		common.SysLog("database migration started")
@@ -432,6 +448,9 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec(clickHouseLogCreateTableSQL(ttlDays)).Error; err != nil {
 		return err
 	}
+	if err := ensureClickHouseLogRowIdColumn(LOG_DB); err != nil {
+		return err
+	}
 	if err := LOG_DB.Exec(clickHouseRequestRiskLogDetailCreateTableSQL(ttlDays)).Error; err != nil {
 		return err
 	}
@@ -468,6 +487,7 @@ func clickHouseLogCreateTableSQL(ttlDays int) string {
 	return fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS logs (
 	id Int64 DEFAULT 0,
+	row_id String DEFAULT '',
 	user_id Int32 DEFAULT 0,
 	created_at Int64 DEFAULT 0,
 	type Int32 DEFAULT 0,
@@ -490,7 +510,7 @@ CREATE TABLE IF NOT EXISTS logs (
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime(created_at))
-ORDER BY (created_at, request_id)%s`, clickHouseLogTTLClause(ttlDays))
+ORDER BY (created_at, request_id, row_id)%s`, clickHouseLogTTLClause(ttlDays))
 }
 
 func clickHouseRequestRiskLogDetailCreateTableSQL(ttlDays int) string {

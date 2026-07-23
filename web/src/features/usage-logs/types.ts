@@ -246,6 +246,7 @@ export interface LogStatistics {
   quota: number
   rpm: number
   tpm: number
+  total: number
 }
 
 // ============================================================================
@@ -307,6 +308,13 @@ export interface TaskLog {
 export interface GetLogsParams {
   p?: number
   page_size?: number
+  with_count?: boolean
+  compact?: boolean
+  cursor_mode?: boolean
+  cursor_created_at?: number
+  cursor_id?: number
+  cursor_request_id?: string
+  cursor_row_id?: string
   type?: number
   username?: string
   token_name?: string
@@ -389,6 +397,15 @@ export interface FetchLogsConfig {
   pageSize: number
   searchParams: Record<string, unknown>
   columnFilters: Array<{ id: string; value: unknown }>
+  defaultTimeRange?: { start: Date; end: Date }
+  compact?: boolean
+  withCount?: boolean
+  cursor?: {
+    createdAt: number
+    id?: number
+    requestId?: string
+    rowId?: string
+  }
 }
 
 // ============================================================================

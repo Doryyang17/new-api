@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import {
   Copy,
@@ -45,6 +46,7 @@ import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+import { getLogDetail } from '../../api'
 import type { UsageLog } from '../../data/schema'
 import {
   parseLogOther,
@@ -458,7 +460,55 @@ interface DetailsDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+interface DetailsDialogContentProps extends DetailsDialogProps {
+  loadError?: string
+  onRetry?: () => void
+}
+
 export function DetailsDialog(props: DetailsDialogProps) {
+  const hasStableDetailLocator = Boolean(
+    props.log.row_id || props.log.cursor_id
+  )
+  const detailQuery = useQuery({
+    queryKey: [
+      'usage-log-detail',
+      props.isAdmin,
+      props.log.row_id,
+      props.log.cursor_id || props.log.id,
+      props.log.request_id,
+      props.log.created_at,
+      props.log.type,
+      props.log.channel,
+      props.log.upstream_request_id,
+    ],
+    queryFn: async () => {
+      const result = await getLogDetail(props.log, props.isAdmin)
+      if (!result.success || !result.data) {
+        throw new Error(result.message || '日志详情加载失败')
+      }
+      return result.data
+    },
+    enabled: props.open && hasStableDetailLocator,
+    placeholderData: props.log,
+    staleTime: 60_000,
+    gcTime: 60_000,
+  })
+
+  return (
+    <DetailsDialogContent
+      {...props}
+      log={detailQuery.data || props.log}
+      loadError={
+        detailQuery.error instanceof Error
+          ? detailQuery.error.message
+          : undefined
+      }
+      onRetry={() => void detailQuery.refetch()}
+    />
+  )
+}
+
+function DetailsDialogContent(props: DetailsDialogContentProps) {
   const { t } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
   const rawDetails = props.log.content ?? ''
@@ -630,6 +680,26 @@ export function DetailsDialog(props: DetailsDialogProps) {
       bodyClassName='pr-2 sm:pr-4'
     >
       <div className='w-full max-w-full min-w-0 space-y-2.5 overflow-x-hidden py-1 sm:space-y-3'>
+        {props.loadError && (
+          <div className='border-destructive/30 bg-destructive/5 text-destructive flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-xs'>
+            <span className='flex min-w-0 items-start gap-1.5'>
+              <AlertTriangle
+                className='mt-0.5 size-3.5 shrink-0'
+                aria-hidden='true'
+              />
+              <span>{props.loadError}</span>
+            </span>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className='h-7 shrink-0 px-2 text-xs'
+              onClick={props.onRetry}
+            >
+              {t('Retry')}
+            </Button>
+          </div>
+        )}
         {/* Overview section - key identifiers */}
         <div className='min-w-0 space-y-1'>
           {props.log.request_id && (
