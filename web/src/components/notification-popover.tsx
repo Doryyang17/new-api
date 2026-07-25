@@ -16,9 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Link } from '@tanstack/react-router'
 import type { TFunction } from 'i18next'
-import { Bell, Megaphone } from 'lucide-react'
+import { Bell, Check, Clock3, Megaphone } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { RichContent } from '@/components/rich-content'
 import { Badge } from '@/components/ui/badge'
@@ -40,17 +43,11 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { getAnnouncementColorClass } from '@/lib/colors'
+import { AnnouncementDetailDialog } from '@/features/announcements/components/announcement-detail-dialog'
+import { AnnouncementLevelBadge } from '@/features/announcements/components/announcement-level-badge'
+import type { Announcement } from '@/features/announcements/types'
 import { formatDateTimeObject } from '@/lib/time'
 import { cn } from '@/lib/utils'
-
-interface AnnouncementItem {
-  id?: number | string
-  type?: string
-  content?: string
-  extra?: string
-  publishDate?: string | Date
-}
 
 interface NotificationPopoverProps {
   open: boolean
@@ -59,8 +56,10 @@ interface NotificationPopoverProps {
   activeTab: 'notice' | 'announcements'
   onTabChange: (tab: 'notice' | 'announcements') => void
   notice: string
-  announcements: AnnouncementItem[]
+  announcements: Announcement[]
   loading: boolean
+  showAnnouncementCenter: boolean
+  onAnnouncementRead: (announcement: Announcement) => Promise<void>
   className?: string
 }
 
@@ -121,33 +120,6 @@ function getRelativeTime(publishDate: string | Date, t: TFunction): string {
 
   // Over 2 years, show specific date
   return formatDateTimeObject(pubDate)
-}
-
-/**
- * Announcement status dot indicator
- */
-function AnnouncementDot({ type }: { type?: string }) {
-  return (
-    <span
-      className={cn(
-        'mt-1.5 inline-block size-2 shrink-0 rounded-full',
-        getAnnouncementColorClass(type)
-      )}
-    />
-  )
-}
-
-function getAnnouncementRenderKey(announcement: AnnouncementItem): string {
-  if (announcement.id !== undefined && announcement.id !== null) {
-    return `id:${announcement.id}`
-  }
-
-  return JSON.stringify({
-    content: announcement.content ?? '',
-    extra: announcement.extra ?? '',
-    publishDate: announcement.publishDate ?? '',
-    type: announcement.type ?? '',
-  })
 }
 
 /**
@@ -216,11 +188,15 @@ function NoticeContent({
 function AnnouncementsContent({
   announcements,
   loading,
+  showReadState,
   t,
+  onOpen,
 }: {
-  announcements: AnnouncementItem[]
+  announcements: Announcement[]
   loading: boolean
+  showReadState: boolean
   t: TFunction
+  onOpen: (announcement: Announcement) => void
 }) {
   if (loading) {
     return (
@@ -242,7 +218,6 @@ function AnnouncementsContent({
     <ScrollArea className='h-[min(52vh,28rem)] pr-3'>
       <div className='flex flex-col'>
         {announcements.map((item, idx) => {
-          const announcementKey = getAnnouncementRenderKey(item)
           const publishDate = item.publishDate
             ? new Date(item.publishDate)
             : null
@@ -254,30 +229,50 @@ function AnnouncementsContent({
             : ''
 
           return (
-            <div key={announcementKey}>
-              <div className='py-3'>
+            <div key={item.key}>
+              <button
+                type='button'
+                onClick={() => onOpen(item)}
+                className='hover:bg-muted/50 focus-visible:ring-ring w-full rounded-lg px-2 py-3 text-left transition-colors outline-none focus-visible:ring-3'
+              >
                 <div className='flex items-start gap-3'>
-                  <AnnouncementDot type={item.type} />
+                  {showReadState ? (
+                    <span
+                      className={cn(
+                        'mt-2 size-2 shrink-0 rounded-full',
+                        item.read ? 'bg-muted-foreground/30' : 'bg-primary'
+                      )}
+                      aria-hidden='true'
+                    />
+                  ) : null}
                   <div className='flex min-w-0 flex-1 flex-col gap-2'>
-                    <div className='text-sm'>
-                      <RichContent breaks content={item.content || ''} />
+                    <div className='flex flex-wrap items-center gap-1.5'>
+                      <AnnouncementLevelBadge level={item.level} />
+                      {showReadState ? (
+                        <span className='text-muted-foreground inline-flex items-center gap-1 text-xs'>
+                          {item.read ? <Check className='size-3' /> : null}
+                          {item.read ? '已阅读' : '未阅读'}
+                        </span>
+                      ) : null}
                     </div>
-
-                    {item.extra ? (
-                      <div className='text-muted-foreground text-xs'>
-                        <RichContent breaks content={item.extra} />
-                      </div>
+                    <p className='line-clamp-2 text-sm leading-5 font-medium'>
+                      {item.title}
+                    </p>
+                    {item.summary ? (
+                      <p className='text-muted-foreground line-clamp-2 text-xs leading-5'>
+                        {item.summary}
+                      </p>
                     ) : null}
-
                     {absoluteTime ? (
-                      <div className='text-muted-foreground text-xs'>
-                        {relativeTime ? `${relativeTime} • ` : null}
+                      <div className='text-muted-foreground flex items-center gap-1 text-xs'>
+                        <Clock3 className='size-3' aria-hidden='true' />
+                        {relativeTime ? `${relativeTime} · ` : null}
                         {absoluteTime}
                       </div>
                     ) : null}
                   </div>
                 </div>
-              </div>
+              </button>
               {idx < announcements.length - 1 ? <Separator /> : null}
             </div>
           )
@@ -299,78 +294,113 @@ export function NotificationPopover({
   notice,
   announcements,
   loading,
+  showAnnouncementCenter,
+  onAnnouncementRead,
   className,
 }: NotificationPopoverProps) {
   const { t } = useTranslation()
+  const [selectedAnnouncement, setSelectedAnnouncement] =
+    useState<Announcement | null>(null)
+
+  const handleOpenAnnouncement = (announcement: Announcement) => {
+    onOpenChange(false)
+    setSelectedAnnouncement(announcement)
+    void onAnnouncementRead(announcement).catch(() => {
+      toast.error('阅读状态保存失败，请稍后重试')
+    })
+  }
+
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger
-        render={
-          <Button
-            variant='ghost'
-            size='icon'
-            className={cn('relative size-9', className)}
-            aria-label={t('Notifications')}
-          />
-        }
-      >
-        <Bell className='size-[1.2rem]' />
-        {unreadCount > 0 ? (
-          <Badge
-            variant='destructive'
-            className='absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center px-1 text-[10px] font-semibold tabular-nums'
-          >
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </Badge>
-        ) : null}
-      </PopoverTrigger>
-
-      <PopoverContent
-        align='end'
-        sideOffset={8}
-        className='w-[min(26rem,calc(100vw-1rem))] gap-3 p-3'
-      >
-        <PopoverHeader className='gap-1 px-1'>
-          <PopoverTitle>{t('System Announcements')}</PopoverTitle>
-          <p className='text-muted-foreground text-xs'>
-            {t('Latest platform updates and notices')}
-          </p>
-        </PopoverHeader>
-
-        <Tabs
-          value={activeTab}
-          onValueChange={onTabChange as (value: string) => void}
-        >
-          <TabsList className='grid w-full grid-cols-2'>
-            <TabsTrigger value='notice' className='gap-1.5'>
-              <Bell className='size-3.5' />
-              {t('Notice')}
-            </TabsTrigger>
-            <TabsTrigger value='announcements' className='gap-1.5'>
-              <Megaphone className='size-3.5' />
-              {t('Timeline')}
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value='notice' className='mt-2'>
-            <NoticeContent notice={notice} loading={loading} t={t} />
-          </TabsContent>
-
-          <TabsContent value='announcements' className='mt-2'>
-            <AnnouncementsContent
-              announcements={announcements}
-              loading={loading}
-              t={t}
+    <>
+      <Popover open={open} onOpenChange={onOpenChange}>
+        <PopoverTrigger
+          render={
+            <Button
+              variant='ghost'
+              size='icon'
+              className={cn('relative size-9', className)}
+              aria-label={t('Notifications')}
             />
-          </TabsContent>
-        </Tabs>
+          }
+        >
+          <Bell className='size-[1.2rem]' />
+          {unreadCount > 0 ? (
+            <Badge
+              variant='destructive'
+              className='absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center px-1 text-[10px] font-semibold tabular-nums'
+            >
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </Badge>
+          ) : null}
+        </PopoverTrigger>
 
-        <div className='flex justify-end'>
-          <Button size='sm' onClick={() => onOpenChange(false)}>
-            {t('Close')}
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
+        <PopoverContent
+          align='end'
+          sideOffset={8}
+          className='w-[min(26rem,calc(100vw-1rem))] gap-3 p-3'
+        >
+          <PopoverHeader className='gap-1 px-1'>
+            <PopoverTitle>{t('System Announcements')}</PopoverTitle>
+            <p className='text-muted-foreground text-xs'>
+              {t('Latest platform updates and notices')}
+            </p>
+          </PopoverHeader>
+
+          <Tabs
+            value={activeTab}
+            onValueChange={onTabChange as (value: string) => void}
+          >
+            <TabsList className='grid w-full grid-cols-2'>
+              <TabsTrigger value='notice' className='gap-1.5'>
+                <Bell className='size-3.5' />
+                {t('Notice')}
+              </TabsTrigger>
+              <TabsTrigger value='announcements' className='gap-1.5'>
+                <Megaphone className='size-3.5' />
+                公告
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value='notice' className='mt-2'>
+              <NoticeContent notice={notice} loading={loading} t={t} />
+            </TabsContent>
+
+            <TabsContent value='announcements' className='mt-2'>
+              <AnnouncementsContent
+                announcements={announcements}
+                loading={loading}
+                showReadState={showAnnouncementCenter}
+                t={t}
+                onOpen={handleOpenAnnouncement}
+              />
+            </TabsContent>
+          </Tabs>
+
+          <div className='flex items-center justify-end gap-2'>
+            {showAnnouncementCenter ? (
+              <Button
+                size='sm'
+                variant='outline'
+                render={<Link to='/announcements' />}
+                onClick={() => onOpenChange(false)}
+              >
+                查看全部公告
+              </Button>
+            ) : null}
+            <Button size='sm' onClick={() => onOpenChange(false)}>
+              {t('Close')}
+            </Button>
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      <AnnouncementDetailDialog
+        announcement={selectedAnnouncement}
+        open={selectedAnnouncement != null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setSelectedAnnouncement(null)
+        }}
+      />
+    </>
   )
 }

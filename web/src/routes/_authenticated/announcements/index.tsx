@@ -16,25 +16,31 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createFileRoute } from '@tanstack/react-router'
+import { z } from 'zod'
 
-type NotificationState = {
-  lastReadNotice: string
-  markNoticeRead: (noticeContent: string) => void
+import { AnnouncementCenter } from '@/features/announcements'
+
+const announcementSearchSchema = z.object({
+  page: z.number().int().positive().optional().catch(1),
+})
+
+function AnnouncementCenterRoute() {
+  const search = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const page = search.page ?? 1
+
+  return (
+    <AnnouncementCenter
+      page={page}
+      onPageChange={(nextPage) => {
+        void navigate({ search: { page: nextPage }, replace: true })
+      }}
+    />
+  )
 }
 
-export const useNotificationStore = create<NotificationState>()(
-  persist(
-    (set) => ({
-      lastReadNotice: '',
-      markNoticeRead: (noticeContent) => {
-        set({ lastReadNotice: noticeContent.trim() })
-      },
-    }),
-    {
-      name: 'notification-storage',
-      partialize: (state) => ({ lastReadNotice: state.lastReadNotice }),
-    }
-  )
-)
+export const Route = createFileRoute('/_authenticated/announcements/')({
+  validateSearch: announcementSearchSchema,
+  component: AnnouncementCenterRoute,
+})

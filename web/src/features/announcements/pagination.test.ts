@@ -16,25 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import assert from 'node:assert/strict'
+import { describe, test } from 'node:test'
 
-type NotificationState = {
-  lastReadNotice: string
-  markNoticeRead: (noticeContent: string) => void
-}
+import { clampAnnouncementPage, getAnnouncementTotalPages } from './pagination'
 
-export const useNotificationStore = create<NotificationState>()(
-  persist(
-    (set) => ({
-      lastReadNotice: '',
-      markNoticeRead: (noticeContent) => {
-        set({ lastReadNotice: noticeContent.trim() })
-      },
-    }),
-    {
-      name: 'notification-storage',
-      partialize: (state) => ({ lastReadNotice: state.lastReadNotice }),
-    }
-  )
-)
+describe('announcement center pagination', () => {
+  test('moves stale and oversized page parameters back into range', () => {
+    assert.equal(getAnnouncementTotalPages(0, 12), 1)
+    assert.equal(getAnnouncementTotalPages(25, 12), 3)
+    assert.equal(clampAnnouncementPage(999, 3), 3)
+    assert.equal(clampAnnouncementPage(-1, 3), 1)
+  })
+})

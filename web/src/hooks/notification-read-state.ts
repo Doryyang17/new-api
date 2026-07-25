@@ -16,25 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+export type NotificationTab = 'notice' | 'announcements'
 
-type NotificationState = {
-  lastReadNotice: string
-  markNoticeRead: (noticeContent: string) => void
+export function shouldMarkNoticeRead(
+  tab: NotificationTab,
+  noticeContent: string
+): boolean {
+  return tab === 'notice' && noticeContent !== ''
 }
-
-export const useNotificationStore = create<NotificationState>()(
-  persist(
-    (set) => ({
-      lastReadNotice: '',
-      markNoticeRead: (noticeContent) => {
-        set({ lastReadNotice: noticeContent.trim() })
-      },
-    }),
-    {
-      name: 'notification-storage',
-      partialize: (state) => ({ lastReadNotice: state.lastReadNotice }),
-    }
-  )
-)

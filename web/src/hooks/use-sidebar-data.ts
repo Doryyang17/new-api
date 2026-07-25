@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Activity,
+  BellRing,
   Box,
   CreditCard,
   FileText,
@@ -36,7 +37,8 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { type SidebarData } from '@/components/layout/types'
+import type { SidebarData } from '@/components/layout/types'
+import { useStatus } from '@/hooks/use-status'
 import { ROLE } from '@/lib/roles'
 
 /**
@@ -47,6 +49,7 @@ import { ROLE } from '@/lib/roles'
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
+  const { status } = useStatus()
 
   return {
     navGroups: [
@@ -75,6 +78,15 @@ export function useSidebarData(): SidebarData {
             url: '/dashboard/overview',
             icon: Activity,
           },
+          ...(status?.announcements_enabled === true
+            ? [
+                {
+                  title: '公告中心',
+                  url: '/announcements' as const,
+                  icon: BellRing,
+                },
+              ]
+            : []),
           {
             title: t('Dashboard'),
             url: '/dashboard/models',

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
+import { AnnouncementsSection } from '../content/announcements-section'
 import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { AvailabilitySection } from '../maintenance/availability-section'
 import { DailyUsageLimitSection } from '../maintenance/daily-usage-limit-section'
@@ -42,6 +43,16 @@ const CUSTOM_SECTIONS = [
           RegistrationCodeRegisterEnabled:
             settings.RegistrationCodeRegisterEnabled ?? false,
         }}
+      />
+    ),
+  },
+  {
+    id: 'announcements',
+    titleKey: 'Announcements',
+    build: (settings: CustomSettings) => (
+      <AnnouncementsSection
+        enabled={settings['console_setting.announcements_enabled']}
+        data={settings['console_setting.announcements']}
       />
     ),
   },

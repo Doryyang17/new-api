@@ -135,6 +135,8 @@ export function AppHeader({
               notice={notifications.notice}
               announcements={notifications.announcements}
               loading={notifications.loading}
+              showAnnouncementCenter={notifications.hasAnnouncementCenter}
+              onAnnouncementRead={notifications.markAnnouncementRead}
             />
           )}
           {showConfigDrawer && <ConfigDrawer />}

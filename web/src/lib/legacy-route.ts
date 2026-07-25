@@ -81,6 +81,9 @@ export function resolveLegacyRoute(rawHref: string): string | null {
   if (pathname === '/console/topup') {
     return buildTargetHref('/wallet', source)
   }
+  if (pathname === '/system-settings/content/announcements') {
+    return buildTargetHref('/system-settings/custom/announcements', source)
+  }
   if (pathname === '/console/setting') {
     const tab = source.searchParams.get('tab') ?? ''
     const target = legacySettingsTabs[tab] ?? '/system-settings'

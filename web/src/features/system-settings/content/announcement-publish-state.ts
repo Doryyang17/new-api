@@ -16,25 +16,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-
-type NotificationState = {
-  lastReadNotice: string
-  markNoticeRead: (noticeContent: string) => void
+export function normalizeAnnouncementImmediate(
+  value: unknown,
+  publishDate: string,
+  now = Date.now()
+): boolean {
+  if (typeof value === 'boolean') return value
+  return new Date(publishDate).getTime() <= now
 }
 
-export const useNotificationStore = create<NotificationState>()(
-  persist(
-    (set) => ({
-      lastReadNotice: '',
-      markNoticeRead: (noticeContent) => {
-        set({ lastReadNotice: noticeContent.trim() })
-      },
-    }),
-    {
-      name: 'notification-storage',
-      partialize: (state) => ({ lastReadNotice: state.lastReadNotice }),
-    }
-  )
-)
+export function resolveAnnouncementPublishDate(props: {
+  immediate: boolean
+  selectedPublishDate: string
+  editingAnnouncement: {
+    immediate: boolean
+    publishDate: string
+  } | null
+  now?: string
+}): string {
+  if (!props.immediate) return props.selectedPublishDate
+  if (props.editingAnnouncement?.immediate) {
+    return props.editingAnnouncement.publishDate
+  }
+  return props.now ?? new Date().toISOString()
+}

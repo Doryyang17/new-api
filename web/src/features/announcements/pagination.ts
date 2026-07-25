@@ -16,25 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-
-type NotificationState = {
-  lastReadNotice: string
-  markNoticeRead: (noticeContent: string) => void
+export function getAnnouncementTotalPages(
+  total: number,
+  pageSize: number
+): number {
+  if (pageSize <= 0) return 1
+  return Math.max(1, Math.ceil(Math.max(0, total) / pageSize))
 }
 
-export const useNotificationStore = create<NotificationState>()(
-  persist(
-    (set) => ({
-      lastReadNotice: '',
-      markNoticeRead: (noticeContent) => {
-        set({ lastReadNotice: noticeContent.trim() })
-      },
-    }),
-    {
-      name: 'notification-storage',
-      partialize: (state) => ({ lastReadNotice: state.lastReadNotice }),
-    }
-  )
-)
+export function clampAnnouncementPage(
+  page: number,
+  totalPages: number
+): number {
+  return Math.min(Math.max(1, page), Math.max(1, totalPages))
+}

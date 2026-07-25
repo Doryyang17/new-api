@@ -285,6 +285,8 @@ export function PublicHeader(props: PublicHeaderProps) {
                   notice={notifications.notice}
                   announcements={notifications.announcements}
                   loading={notifications.loading}
+                  showAnnouncementCenter={notifications.hasAnnouncementCenter}
+                  onAnnouncementRead={notifications.markAnnouncementRead}
                 />
               )}
 

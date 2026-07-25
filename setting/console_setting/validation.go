@@ -6,8 +6,12 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/QuantumNous/new-api/pkg/announcementkey"
 )
 
 var (
@@ -149,6 +153,8 @@ func validateAnnouncements(announcementsStr string) error {
 	validTypes := map[string]bool{
 		"default": true, "ongoing": true, "success": true, "warning": true, "error": true,
 	}
+	validLevels := map[string]bool{"normal": true, "important": true, "urgent": true}
+	seenSignatures := make(map[string]struct{}, len(list))
 	for i, ann := range list {
 		content, ok := ann["content"].(string)
 		if !ok || content == "" {
@@ -165,19 +171,81 @@ func validateAnnouncements(announcementsStr string) error {
 		if _, err := time.Parse(time.RFC3339, publishDateStr); err != nil {
 			return fmt.Errorf("第%d个公告的发布日期格式错误", i+1)
 		}
-		if t, exists := ann["type"]; exists {
-			if typeStr, ok := t.(string); ok {
-				if !validTypes[typeStr] {
-					return fmt.Errorf("第%d个公告的类型值不合法", i+1)
-				}
+		idSignature := ""
+		if id, exists := ann["id"]; exists {
+			switch value := id.(type) {
+			case nil:
+			case string:
+				idSignature = strings.TrimSpace(value)
+			case float64:
+				idSignature = strconv.FormatFloat(value, 'f', -1, 64)
+			default:
+				return fmt.Errorf("第%d个公告的ID格式不合法", i+1)
 			}
 		}
-		if len(content) > 500 {
-			return fmt.Errorf("第%d个公告的内容长度不能超过500字符", i+1)
+		readKey := announcementkey.Legacy(publishDateStr, content)
+		if idSignature != "" {
+			readKey = announcementkey.FromID(idSignature)
+		}
+		if _, exists := seenSignatures[readKey]; exists {
+			return fmt.Errorf("第%d个公告与其他公告使用了重复的唯一标识", i+1)
+		}
+		seenSignatures[readKey] = struct{}{}
+		if t, exists := ann["type"]; exists {
+			typeStr, ok := t.(string)
+			if !ok || !validTypes[typeStr] {
+				return fmt.Errorf("第%d个公告的类型值不合法", i+1)
+			}
+		}
+		if level, exists := ann["level"]; exists {
+			levelStr, ok := level.(string)
+			if !ok || !validLevels[levelStr] {
+				return fmt.Errorf("第%d个公告的等级值不合法", i+1)
+			}
+		}
+		if title, exists := ann["title"]; exists {
+			if titleStr, ok := title.(string); !ok || utf8.RuneCountInString(titleStr) > 120 {
+				return fmt.Errorf("第%d个公告的标题长度不能超过120字符", i+1)
+			}
+		}
+		if forceRead, exists := ann["forceRead"]; exists {
+			if _, ok := forceRead.(bool); !ok {
+				return fmt.Errorf("第%d个公告的强制阅读配置不合法", i+1)
+			}
+		}
+		if immediate, exists := ann["immediate"]; exists {
+			if _, ok := immediate.(bool); !ok {
+				return fmt.Errorf("第%d个公告的立即发布配置不合法", i+1)
+			}
+		}
+		if category, exists := ann["category"]; exists {
+			if _, ok := category.(string); !ok {
+				return fmt.Errorf("第%d个公告的分类配置不合法", i+1)
+			}
+		}
+		if pinned, exists := ann["pinned"]; exists {
+			if _, ok := pinned.(bool); !ok {
+				return fmt.Errorf("第%d个公告的置顶配置不合法", i+1)
+			}
+		}
+		if utf8.RuneCountInString(content) > 10000 {
+			return fmt.Errorf("第%d个公告的内容长度不能超过10000字符", i+1)
 		}
 		if extra, exists := ann["extra"]; exists {
-			if extraStr, ok := extra.(string); ok && len(extraStr) > 200 {
-				return fmt.Errorf("第%d个公告的说明长度不能超过200字符", i+1)
+			extraStr, ok := extra.(string)
+			if !ok || utf8.RuneCountInString(extraStr) > 300 {
+				return fmt.Errorf("第%d个公告的摘要长度不能超过300字符", i+1)
+			}
+		}
+		if offlineAt, exists := ann["offlineAt"]; exists {
+			offlineAtStr, ok := offlineAt.(string)
+			if !ok {
+				return fmt.Errorf("第%d个公告的下线时间格式错误", i+1)
+			}
+			if offlineAtStr != "" {
+				if _, err := time.Parse(time.RFC3339, offlineAtStr); err != nil {
+					return fmt.Errorf("第%d个公告的下线时间格式错误", i+1)
+				}
 			}
 		}
 	}

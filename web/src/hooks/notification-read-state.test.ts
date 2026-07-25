@@ -16,25 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import assert from 'node:assert/strict'
+import { describe, test } from 'node:test'
 
-type NotificationState = {
-  lastReadNotice: string
-  markNoticeRead: (noticeContent: string) => void
-}
+import { shouldMarkNoticeRead } from './notification-read-state'
 
-export const useNotificationStore = create<NotificationState>()(
-  persist(
-    (set) => ({
-      lastReadNotice: '',
-      markNoticeRead: (noticeContent) => {
-        set({ lastReadNotice: noticeContent.trim() })
-      },
-    }),
-    {
-      name: 'notification-storage',
-      partialize: (state) => ({ lastReadNotice: state.lastReadNotice }),
-    }
-  )
-)
+describe('notification read state', () => {
+  test('does not mark Notice read when only the announcement tab is opened', () => {
+    assert.equal(shouldMarkNoticeRead('announcements', '系统通知'), false)
+  })
+
+  test('marks a non-empty Notice read when its tab is viewed', () => {
+    assert.equal(shouldMarkNoticeRead('notice', '系统通知'), true)
+    assert.equal(shouldMarkNoticeRead('notice', ''), false)
+  })
+})

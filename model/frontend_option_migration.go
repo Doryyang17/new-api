@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/announcementkey"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"gorm.io/gorm"
 )
@@ -40,6 +41,9 @@ func MigrateRetiredFrontendOptions() error {
 		if err := migrateLegacyOption(migration.source, migration.target, migration.transform); err != nil {
 			migrationErrors = append(migrationErrors, err)
 		}
+	}
+	if err := normalizeAnnouncementOptionIDs(); err != nil {
+		migrationErrors = append(migrationErrors, fmt.Errorf("normalize console_setting.announcements: %w", err))
 	}
 	if err := migrateLegacyUptimeOptions(); err != nil {
 		migrationErrors = append(migrationErrors, err)
@@ -128,10 +132,72 @@ func transformLegacyAnnouncements(value string) (string, error) {
 	if strings.TrimSpace(value) == "" {
 		return "", errors.New("value is empty")
 	}
-	if err := console_setting.ValidateConsoleSettings(value, "Announcements"); err != nil {
-		return "", err
+	normalized, _, err := normalizeAnnouncementIDs(value)
+	return normalized, err
+}
+
+func normalizeAnnouncementIDs(value string) (string, bool, error) {
+	var items []map[string]any
+	if err := common.UnmarshalJsonStr(value, &items); err != nil {
+		return "", false, err
 	}
-	return value, nil
+
+	changed := false
+	for index, item := range items {
+		id, hasID := item["id"]
+		switch value := id.(type) {
+		case string:
+			hasID = strings.TrimSpace(value) != ""
+		case nil:
+			hasID = false
+		}
+		if hasID {
+			continue
+		}
+
+		publishDate, publishDateOK := item["publishDate"].(string)
+		content, contentOK := item["content"].(string)
+		if !publishDateOK || !contentOK {
+			return "", false, fmt.Errorf("announcement entry %d is missing content or publishDate", index)
+		}
+		item["id"] = announcementkey.LegacyID(publishDate, content)
+		changed = true
+	}
+
+	if !changed {
+		if err := console_setting.ValidateConsoleSettings(value, "Announcements"); err != nil {
+			return "", false, err
+		}
+		return value, false, nil
+	}
+	encoded, err := common.Marshal(items)
+	if err != nil {
+		return "", false, err
+	}
+	result := string(encoded)
+	if err := console_setting.ValidateConsoleSettings(result, "Announcements"); err != nil {
+		return "", false, err
+	}
+	return result, true, nil
+}
+
+func normalizeAnnouncementOptionIDs() error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var option Option
+		err := tx.Where(&Option{Key: "console_setting.announcements"}).First(&option).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) || strings.TrimSpace(option.Value) == "" {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		normalized, changed, err := normalizeAnnouncementIDs(option.Value)
+		if err != nil || !changed {
+			return err
+		}
+		return tx.Model(&option).Update("value", normalized).Error
+	})
 }
 
 func transformLegacyFAQ(value string) (string, error) {

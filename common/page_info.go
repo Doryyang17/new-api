@@ -6,6 +6,32 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// GetPageBounds returns a bounded half-open range for a page. It compares the
+// requested page with the available rows before multiplying, so hostile page
+// values cannot overflow into a negative slice or database offset.
+func GetPageBounds(total int64, page int, pageSize int) (int, int) {
+	if total <= 0 || pageSize <= 0 {
+		return 0, 0
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	lastPage := (total-1)/int64(pageSize) + 1
+	if int64(page) > lastPage {
+		end := int(total)
+		return end, end
+	}
+
+	start := int64(page-1) * int64(pageSize)
+	remaining := total - start
+	end := total
+	if remaining > int64(pageSize) {
+		end = start + int64(pageSize)
+	}
+	return int(start), int(end)
+}
+
 type PageInfo struct {
 	Page     int `json:"page"`      // page num 页码
 	PageSize int `json:"page_size"` // page size 页大小

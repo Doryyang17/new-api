@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { SettingsPage } from '../components/settings-page'
-import type { CustomSettings } from '../types'
+import type { CustomSettings, SystemOption } from '../types'
 import {
   CUSTOM_DEFAULT_SECTION,
   getCustomSectionContent,
@@ -26,6 +26,8 @@ import {
 
 const defaultCustomSettings: CustomSettings = {
   RegistrationCodeRegisterEnabled: false,
+  'console_setting.announcements': '[]',
+  'console_setting.announcements_enabled': true,
   'availability_setting.enabled': false,
   'availability_setting.unavailable_start': '22:00',
   'availability_setting.unavailable_end': '08:00',
@@ -77,6 +79,24 @@ const defaultCustomSettings: CustomSettings = {
   'request_risk_setting.group_whitelist': [],
 }
 
+function resolveCustomSettings(
+  settings: CustomSettings,
+  raw: SystemOption[] | undefined
+): CustomSettings {
+  if (!raw || raw.length === 0) return settings
+
+  const optionMap = new Map(raw.map((item) => [item.key, item.value]))
+  if (optionMap.has('console_setting.announcements')) return settings
+
+  const legacyAnnouncements = optionMap.get('Announcements')
+  if (legacyAnnouncements === undefined) return settings
+
+  return {
+    ...settings,
+    'console_setting.announcements': legacyAnnouncements,
+  }
+}
+
 export function CustomSettings() {
   return (
     <SettingsPage
@@ -86,6 +106,7 @@ export function CustomSettings() {
       getSectionContent={getCustomSectionContent}
       getSectionMeta={getCustomSectionMeta}
       loadingMessage='Loading custom feature settings...'
+      resolveSettings={resolveCustomSettings}
     />
   )
 }

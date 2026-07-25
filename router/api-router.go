@@ -26,6 +26,21 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/models", middleware.UserAuth(), controller.DashboardListModels)
 		apiRouter.GET("/status/test", middleware.AdminAuth(), controller.TestStatus)
 		apiRouter.GET("/notice", controller.GetNotice)
+		apiRouter.GET("/announcements/public", controller.GetPublicAnnouncements)
+		announcementRoute := apiRouter.Group("/announcements")
+		announcementRoute.Use(middleware.UserAuth())
+		{
+			announcementRoute.GET("", controller.GetAnnouncements)
+			announcementRoute.GET("/unread-count", controller.GetAnnouncementUnreadCount)
+			announcementRoute.GET("/mandatory", controller.GetUnreadRequiredAnnouncements)
+			announcementRoute.POST("/:key/read", controller.MarkAnnouncementRead)
+		}
+		announcementAdminRoute := apiRouter.Group("/announcements/admin")
+		announcementAdminRoute.Use(middleware.RootAuth())
+		{
+			announcementAdminRoute.GET("/stats", controller.GetAnnouncementStats)
+			announcementAdminRoute.GET("/:key/unread-users", controller.GetAnnouncementUnreadUsers)
+		}
 		apiRouter.GET("/user-agreement", controller.GetUserAgreement)
 		apiRouter.GET("/privacy-policy", controller.GetPrivacyPolicy)
 		apiRouter.GET("/about", controller.GetAbout)

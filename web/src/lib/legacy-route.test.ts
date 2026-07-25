@@ -56,6 +56,12 @@ describe('legacy frontend route migration', () => {
       resolveLegacyRoute('/console/topup?source=email#orders'),
       '/wallet?source=email#orders'
     )
+    assert.equal(
+      resolveLegacyRoute(
+        '/system-settings/content/announcements?from=bookmark#editor'
+      ),
+      '/system-settings/custom/announcements?from=bookmark#editor'
+    )
   })
 
   test('maps legacy settings tabs and retains unrelated parameters', () => {

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/announcementkey"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -55,7 +56,17 @@ func TestMigrateRetiredFrontendOptionsMigratesValidValuesIdempotently(t *testing
 	require.NoError(t, MigrateRetiredFrontendOptions())
 	assert.Equal(t, "default", requireOptionValue(t, db, retiredThemeOptionKey))
 	assert.JSONEq(t, legacy[1].Value, requireOptionValue(t, db, "console_setting.api_info"))
-	assert.Equal(t, legacy[2].Value, requireOptionValue(t, db, "console_setting.announcements"))
+	var migratedAnnouncements []map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(
+		requireOptionValue(t, db, "console_setting.announcements"),
+		&migratedAnnouncements,
+	))
+	require.Len(t, migratedAnnouncements, 1)
+	assert.Equal(
+		t,
+		announcementkey.LegacyID("2026-07-20T00:00:00Z", "maintenance"),
+		migratedAnnouncements[0]["id"],
+	)
 	assert.JSONEq(t, `[{"question":"Question","answer":"Answer"}]`, requireOptionValue(t, db, "console_setting.faq"))
 	assert.JSONEq(t, `[{
 		"id":1,"categoryName":"old","url":"https://status.example.com","slug":"status","description":""
@@ -70,6 +81,29 @@ func TestMigrateRetiredFrontendOptionsMigratesValidValuesIdempotently(t *testing
 	after, err := AllOption()
 	require.NoError(t, err)
 	assert.ElementsMatch(t, before, after)
+}
+
+func TestMigrateRetiredFrontendOptionsAddsStableIDsToAuthoritativeAnnouncements(t *testing.T) {
+	db := useFrontendOptionMigrationDB(t)
+	value := `[{"content":"maintenance","publishDate":"2026-07-20T00:00:00Z","type":"warning"}]`
+	require.NoError(t, db.Create(&Option{
+		Key:   "console_setting.announcements",
+		Value: value,
+	}).Error)
+
+	require.NoError(t, MigrateRetiredFrontendOptions())
+	first := requireOptionValue(t, db, "console_setting.announcements")
+	require.NoError(t, MigrateRetiredFrontendOptions())
+	assert.Equal(t, first, requireOptionValue(t, db, "console_setting.announcements"))
+
+	var announcements []map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(first, &announcements))
+	require.Len(t, announcements, 1)
+	assert.Equal(
+		t,
+		announcementkey.LegacyID("2026-07-20T00:00:00Z", "maintenance"),
+		announcements[0]["id"],
+	)
 }
 
 func TestLegacyConsoleListMigrationCapsAPIInfoAndFAQ(t *testing.T) {
