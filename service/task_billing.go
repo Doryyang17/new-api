@@ -254,10 +254,11 @@ func RecordTaskTokenUsageLog(ctx context.Context, task *model.Task, totalTokens 
 
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
-func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
+// 返回资金来源是否已成功退还；失败时保留 quota 作为后续对账标记。
+func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool {
 	quota := task.Quota
 	if quota == 0 {
-		return
+		return true
 	}
 
 	bonusConsumed := min(task.PrivateData.CheckinBonusConsumed, quota)
@@ -267,27 +268,27 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 	_, _, _, tokenHandled, handled, err := model.RefundCheckinBonusFundingUsage(task.PrivateData.BillingRequestId, time.Now())
 	if err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("退还任务资金失败 task %s: %s", task.TaskID, err.Error()))
-		return
+		return false
 	}
 	if !handled && originalConsumed > 0 {
 		if err := taskAdjustFunding(task, -originalConsumed); err != nil {
 			logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
-			return
+			return false
 		}
 	}
 	if !handled && bonusConsumed > 0 {
 		if _, err := model.RefundCheckinBonusUsage(task.PrivateData.BillingRequestId, time.Now()); err != nil {
 			logger.LogWarn(ctx, fmt.Sprintf("退还签到赠金失败 task %s: %s", task.TaskID, err.Error()))
-			return
+			return false
 		}
 	}
 
-	// 3. 新账本会在同一事务中退还令牌；旧任务没有令牌账本时走兼容路径。
+	// 2. 新账本会在同一事务中退还令牌；旧任务没有令牌账本时走兼容路径。
 	if !tokenHandled {
 		taskAdjustTokenQuota(ctx, task, -quota)
 	}
 
-	// 4. 记录日志
+	// 3. 记录日志
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
 	other["reason"] = reason
@@ -302,6 +303,14 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 		Group:     task.Group,
 		Other:     other,
 	})
+
+	// 4. 资金退款完成后再清除持久化标记；失败时保留非零 quota，
+	// 由后续对账重试。回写失败必须显式告警，避免漏掉潜在的重复退款风险。
+	task.Quota = 0
+	if err := task.UpdateQuota(); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("退款成功但清除 task quota 失败 task %s: %s", task.TaskID, err.Error()))
+	}
+	return true
 }
 
 func adjustTaskFundingWithCheckinBonus(task *model.Task, quotaDelta int) error {
