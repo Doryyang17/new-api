@@ -318,7 +318,7 @@ export function AnnouncementCenter(props: {
                 </header>
 
                 <ScrollArea className='min-h-0 flex-1'>
-                  <article className='mx-auto w-full max-w-4xl px-4 py-6 sm:px-8 sm:py-8'>
+                  <article className='w-full max-w-4xl px-4 py-6 text-left sm:px-6 sm:py-8'>
                     <RichContent
                       breaks
                       content={selectedAnnouncement.content}

@@ -485,9 +485,10 @@ export function AnnouncementsSection(props: AnnouncementsSectionProps) {
       {
         id: 'announcement',
         header: '公告',
-        cellClassName: 'min-w-56',
+        className: 'w-80 max-w-80 xl:w-128 xl:max-w-128',
+        cellClassName: 'w-80 max-w-80 xl:w-128 xl:max-w-128',
         cell: (announcement) => (
-          <div className='min-w-0'>
+          <div className='min-w-0 overflow-hidden'>
             <p className='truncate font-medium'>{announcement.title}</p>
             <p className='text-muted-foreground line-clamp-1 text-xs'>
               {announcement.extra || announcement.content}
@@ -644,6 +645,7 @@ export function AnnouncementsSection(props: AnnouncementsSectionProps) {
       <StaticDataTable
         data={sortedAnnouncements}
         columns={columns}
+        tableClassName='table-fixed'
         getRowKey={(announcement) => announcement.rowKey}
         emptyContent={
           <div className='text-muted-foreground flex min-h-48 items-center justify-center'>
