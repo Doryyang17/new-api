@@ -93,6 +93,16 @@ export function isViolationFeeLog(other: LogOtherData | null): boolean {
 }
 
 /**
+ * Check whether this request actually matched the configured probe penalty
+ * tier. Enabling tiered billing alone is not enough; matched_tier is the
+ * settlement result written by the backend for this specific request.
+ */
+export function isProbePenaltyLog(other: LogOtherData | null): boolean {
+  if (!other || other.billing_mode !== 'tiered_expr') return false
+  return normalizeTierLabel(other.matched_tier).includes('测活')
+}
+
+/**
  * Parse the 'other' field from JSON string to object
  */
 export function parseLogOther(other: string): LogOtherData | null {
@@ -231,6 +241,7 @@ export interface TieredBillingSummary {
   tiers: ParsedTier[]
   tier: ParsedTier
   priceEntries: Array<{ field: string; shortLabel: string; price: number }>
+  fixedPriceUSD?: number
 }
 
 /**
@@ -276,7 +287,13 @@ export function getTieredBillingSummary(
       })
     }
   }
-  return { tiers, tier, priceEntries }
+  const fixedPriceUSD = Number(tier.fixedPriceUSD || 0)
+  return {
+    tiers,
+    tier,
+    priceEntries,
+    fixedPriceUSD: fixedPriceUSD > 0 ? fixedPriceUSD : undefined,
+  }
 }
 
 /**

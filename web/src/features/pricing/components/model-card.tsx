@@ -93,6 +93,9 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
 
   let priceSummary: ReactNode
   if (dynamicSummary) {
+    const headlineEntries = dynamicSummary.entries.filter((entry) =>
+      ['inputPrice', 'outputPrice', 'cacheReadPrice'].includes(entry.field)
+    )
     if (dynamicSummary.isSpecialExpression) {
       priceSummary = (
         <span className='min-w-0'>
@@ -104,10 +107,10 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           </code>
         </span>
       )
-    } else if (dynamicSummary.primaryEntries.length > 0) {
+    } else if (headlineEntries.length > 0) {
       priceSummary = (
         <>
-          {dynamicSummary.primaryEntries.map((entry) => (
+          {headlineEntries.map((entry) => (
             <span
               key={entry.key}
               className='text-muted-foreground whitespace-nowrap'

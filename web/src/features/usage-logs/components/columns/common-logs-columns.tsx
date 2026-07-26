@@ -46,6 +46,7 @@ import {
   formatModelName,
   getTieredBillingSummary,
   hasAnyCacheTokens,
+  isProbePenaltyLog,
   parseLogOther,
   isViolationFeeLog,
   renderAuditContent,
@@ -99,7 +100,23 @@ function splitQuotaDisplay(value: string): { prefix: string; amount: string } {
   return { prefix: match[1], amount: match[2] }
 }
 
-function renderQuotaDeductionAmount(quota: number, bonus = false) {
+function renderProbePenaltyIcon() {
+  return (
+    <span
+      role='img'
+      aria-label='测活惩罚扣费'
+      title='测活惩罚扣费'
+      className='inline-flex size-5 shrink-0 items-center justify-center rounded-[4px] bg-red-600 text-[9px] leading-none font-semibold text-white'
+    >
+      异
+    </span>
+  )
+}
+
+function renderQuotaDeductionAmount(
+  quota: number,
+  options: { bonus?: boolean; probePenalty?: boolean } = {}
+) {
   const quotaDisplay = splitQuotaDisplay(formatLogQuota(quota))
 
   return (
@@ -110,7 +127,7 @@ function renderQuotaDeductionAmount(quota: number, bonus = false) {
         )}
         <span>{quotaDisplay.amount}</span>
       </span>
-      {bonus && (
+      {options.bonus && (
         <img
           src='/checkin-bonus-icon.svg'
           alt='签到赠金抵扣'
@@ -118,6 +135,7 @@ function renderQuotaDeductionAmount(quota: number, bonus = false) {
           className='size-5 shrink-0'
         />
       )}
+      {options.probePenalty && renderProbePenaltyIcon()}
     </span>
   )
 }
@@ -191,11 +209,20 @@ function buildTypeDetailSegments(
   const tieredSummary = getTieredBillingSummary(other)
   if (isTieredExpr) {
     if (tieredSummary) {
+      const tierLabel = tieredSummary.tier.label || t('Default')
+      if (tieredSummary.fixedPriceUSD) {
+        segments.push({
+          text: `${tierLabel} · ${formatBillingCurrencyFromUSD(
+            tieredSummary.fixedPriceUSD,
+            priceOpts
+          )}/${t('request')}`,
+        })
+      }
+
       const baseEntries = tieredSummary.priceEntries
         .filter((entry) => ['inputPrice', 'outputPrice'].includes(entry.field))
         .map((entry) => formatPriceCompact(entry.price))
       if (baseEntries.length > 0) {
-        const tierLabel = tieredSummary.tier.label || t('Default')
         segments.push({
           text: `${tierLabel} · ${formatPriceList(baseEntries, true)}`,
         })
@@ -728,37 +755,44 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const other = parseLogOther(log.other)
         const isSubscription = other?.billing_source === 'subscription'
         const bonusDeducted = other?.checkin_bonus_deducted ?? 0
+        const probePenalty = isProbePenaltyLog(other)
 
         if (bonusDeducted > 0) {
-          return renderQuotaDeductionAmount(other?.consume_total ?? quota, true)
+          return renderQuotaDeductionAmount(other?.consume_total ?? quota, {
+            bonus: true,
+            probePenalty,
+          })
         }
 
         if (isSubscription) {
           return (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <StatusBadge
-                      label={t('Subscription')}
-                      variant='success'
-                      size='sm'
-                      copyable={false}
-                      className='cursor-help'
-                    />
-                  }
-                />
-                <TooltipContent>
-                  <span>
-                    {t('Deducted by subscription')}: {formatLogQuota(quota)}
-                  </span>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <span className='inline-flex items-center gap-1.5'>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <StatusBadge
+                        label={t('Subscription')}
+                        variant='success'
+                        size='sm'
+                        copyable={false}
+                        className='cursor-help'
+                      />
+                    }
+                  />
+                  <TooltipContent>
+                    <span>
+                      {t('Deducted by subscription')}: {formatLogQuota(quota)}
+                    </span>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              {probePenalty && renderProbePenaltyIcon()}
+            </span>
           )
         }
 
-        return renderQuotaDeductionAmount(quota)
+        return renderQuotaDeductionAmount(quota, { probePenalty })
       },
     },
 

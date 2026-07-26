@@ -43,6 +43,7 @@ import {
   type RequestRuleGroup,
   type TierCondition,
 } from '../lib/billing-expr'
+import { selectPreferredDynamicPricingTier } from '../lib/dynamic-price'
 
 type DynamicPricingBreakdownProps = {
   billingExpr: string | null | undefined
@@ -153,6 +154,35 @@ function describeGroup(
     .join(' && ')
 }
 
+function movePreferredTierFirst(
+  tiers: ParsedTier[],
+  matchedTierLabel?: string | null
+): ParsedTier[] {
+  if (tiers.length < 2) return tiers
+
+  const normalizedMatched = normalizeTierLabel(matchedTierLabel ?? undefined)
+  const preferred = normalizedMatched
+    ? tiers.find((tier) => normalizeTierLabel(tier.label) === normalizedMatched)
+    : selectPreferredDynamicPricingTier(tiers)
+  if (!preferred || preferred === tiers[0]) return tiers
+
+  return [preferred, ...tiers.filter((tier) => tier !== preferred)]
+}
+
+function formatDisplayAmount(value: number): string {
+  return value.toFixed(4).replace(/\.?0+$/, '')
+}
+
+function getTierDisplayKey(tier: ParsedTier): string {
+  const conditions = tier.conditions
+    .map((condition) => `${condition.var}${condition.op}${condition.value}`)
+    .join('&')
+  const prices = BILLING_PRICING_VARS.map((variable) =>
+    variable.field ? String(tier[variable.field] || '') : ''
+  ).join(',')
+  return `${tier.label}|${conditions}|${String(tier.fixedPriceUSD || '')}|${prices}`
+}
+
 export function DynamicPricingBreakdown({
   billingExpr,
   matchedTierLabel,
@@ -178,13 +208,16 @@ export function DynamicPricingBreakdown({
 
   const { tiers, ruleGroups } = useMemo(() => {
     const split = splitBillingExprAndRequestRules(expr)
-    const parsedTiers = parseTiersFromExpr(split.billingExpr)
+    const parsedTiers = movePreferredTierFirst(
+      parseTiersFromExpr(split.billingExpr),
+      matchedTierLabel
+    )
     const parsedRules = tryParseRequestRuleExpr(split.requestRuleExpr || '')
     return {
       tiers: parsedTiers,
       ruleGroups: parsedRules || [],
     }
-  }, [expr])
+  }, [expr, matchedTierLabel])
 
   const hasTiers = tiers.length > 0
   const hasRules = ruleGroups.length > 0
@@ -229,6 +262,9 @@ export function DynamicPricingBreakdown({
       (tier) => Number(tier[v.field as string as keyof ParsedTier] || 0) > 0
     )
   })
+  const hasFixedPrice = tiers.some(
+    (tier) => Number(tier.fixedPriceUSD || 0) > 0
+  )
 
   return (
     <section className={cn('min-w-0', !compact && 'py-3 sm:py-4')}>
@@ -260,7 +296,7 @@ export function DynamicPricingBreakdown({
             {t('Tiered price table')}
           </div>
           <div className='space-y-1.5 sm:hidden'>
-            {tiers.map((tier, i) => {
+            {tiers.map((tier) => {
               const condSummary = formatConditionSummary(tier.conditions, t)
               const isMatched =
                 matchedTierLabel != null &&
@@ -268,7 +304,7 @@ export function DynamicPricingBreakdown({
                 tier.label === matchedTierLabel
               return (
                 <div
-                  key={`tier-mobile-${i}`}
+                  key={getTierDisplayKey(tier)}
                   className={cn(
                     'rounded-md border p-2',
                     isMatched && 'border-emerald-500/40 bg-emerald-500/10'
@@ -296,6 +332,23 @@ export function DynamicPricingBreakdown({
                     </div>
                   )}
                   <div className='grid grid-cols-2 gap-x-3 gap-y-1.5'>
+                    {hasFixedPrice && (
+                      <div className='min-w-0'>
+                        <div className='text-muted-foreground truncate text-[10px] font-medium tracking-wider uppercase'>
+                          固定费
+                        </div>
+                        <div
+                          className={cn(
+                            'truncate font-mono',
+                            compact ? 'text-xs' : 'text-sm font-semibold'
+                          )}
+                        >
+                          {Number(tier.fixedPriceUSD || 0) > 0
+                            ? `${symbol}${formatDisplayAmount(Number(tier.fixedPriceUSD) * rate)}/次`
+                            : '-'}
+                        </div>
+                      </div>
+                    )}
                     {visiblePriceFields.map((v) => {
                       const value = Number(
                         tier[v.field as string as keyof ParsedTier] || 0
@@ -332,7 +385,7 @@ export function DynamicPricingBreakdown({
             }
             headerRowClassName='hover:bg-transparent'
             data={tiers}
-            getRowKey={(_tier, index) => `tier-${index}`}
+            getRowKey={getTierDisplayKey}
             getRowClassName={(tier) => {
               const isMatched =
                 normalizedMatchedTierLabel !== '' &&
@@ -384,8 +437,34 @@ export function DynamicPricingBreakdown({
                   )
                 },
               },
-              ...visiblePriceFields.map((v, index) => ({
-                id: v.field ?? `price-${index}`,
+              ...(hasFixedPrice
+                ? [
+                    {
+                      id: 'fixed-price',
+                      header: '固定费',
+                      className: cn(
+                        'text-muted-foreground py-2 text-right font-medium',
+                        compact && 'h-8'
+                      ),
+                      cellClassName: cn(
+                        'text-right align-top font-mono',
+                        compact ? 'py-2' : 'py-2.5'
+                      ),
+                      cell: (tier: ParsedTier) => {
+                        const value = Number(tier.fixedPriceUSD || 0)
+                        return value > 0 ? (
+                          <span className={cn(!compact && 'font-semibold')}>
+                            {`${symbol}${formatDisplayAmount(value * rate)}/次`}
+                          </span>
+                        ) : (
+                          '-'
+                        )
+                      },
+                    },
+                  ]
+                : []),
+              ...visiblePriceFields.map((v) => ({
+                id: v.field ?? `price-${v.key}`,
                 header: t(v.shortLabel),
                 className: cn(
                   'text-muted-foreground py-2 text-right font-medium',
@@ -425,27 +504,30 @@ export function DynamicPricingBreakdown({
             {t('Conditional multipliers')}
           </div>
           <ul className='space-y-1.5'>
-            {ruleGroups.map((group, gi) => (
-              <li
-                key={`group-${gi}`}
-                className='bg-muted/50 flex items-center justify-between gap-3 rounded-md px-3 py-2'
-              >
-                <span
-                  className={cn(
-                    'text-foreground break-all',
-                    compact ? 'text-xs' : 'text-sm'
-                  )}
+            {ruleGroups.map((group) => {
+              const description = describeGroup(group, t)
+              return (
+                <li
+                  key={`${description}|${group.multiplier}`}
+                  className='bg-muted/50 flex items-center justify-between gap-3 rounded-md px-3 py-2'
                 >
-                  {describeGroup(group, t)}
-                </span>
-                <Badge
-                  variant='secondary'
-                  className='shrink-0 bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300'
-                >
-                  {group.multiplier}x
-                </Badge>
-              </li>
-            ))}
+                  <span
+                    className={cn(
+                      'text-foreground break-all',
+                      compact ? 'text-xs' : 'text-sm'
+                    )}
+                  >
+                    {description}
+                  </span>
+                  <Badge
+                    variant='secondary'
+                    className='shrink-0 bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300'
+                  >
+                    {group.multiplier}x
+                  </Badge>
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}

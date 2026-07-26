@@ -22,6 +22,7 @@ import { TOKEN_UNIT_DIVISORS } from '../constants'
 import type { PricingModel, TokenUnit } from '../types'
 import {
   BILLING_PRICING_VARS,
+  normalizeTierLabel,
   parseTiersFromExpr,
   splitBillingExprAndRequestRules,
   tryParseRequestRuleExpr,
@@ -153,6 +154,37 @@ export function getDynamicPriceEntries(
   })
 }
 
+function hasBaseTokenPrices(tier: ParsedTier): boolean {
+  return Number(tier.inputPrice || 0) > 0 || Number(tier.outputPrice || 0) > 0
+}
+
+function hasAnyTokenPrices(tier: ParsedTier): boolean {
+  return BILLING_PRICING_VARS.some((variable) => {
+    if (!variable.field) return false
+    return Number(tier[variable.field] || 0) > 0
+  })
+}
+
+/**
+ * Pick the tier used for the model-square headline price. The normal tier is
+ * the user-facing business price; fixed probe/health-check tiers remain in the
+ * detailed breakdown but must not hide normal token prices on the card.
+ */
+export function selectPreferredDynamicPricingTier(
+  tiers: ParsedTier[]
+): ParsedTier | null {
+  if (tiers.length === 0) return null
+
+  const normalTier = tiers.find(
+    (tier) => normalizeTierLabel(tier.label) === 'normal'
+  )
+  if (normalTier) return normalTier
+
+  return (
+    tiers.find(hasBaseTokenPrices) || tiers.find(hasAnyTokenPrices) || tiers[0]
+  )
+}
+
 export function getDynamicPricingSummary(
   model: PricingModel,
   options: DynamicPriceOptions
@@ -160,7 +192,7 @@ export function getDynamicPricingSummary(
   if (!isDynamicPricingModel(model)) return null
 
   const tiers = getDynamicPricingTiers(model)
-  const tier = tiers[0] || null
+  const tier = selectPreferredDynamicPricingTier(tiers)
   const entries = getDynamicPriceEntries(tier, options)
   const rawExpression = model.billing_expr || ''
 

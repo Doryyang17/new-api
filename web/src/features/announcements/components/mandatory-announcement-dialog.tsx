@@ -45,19 +45,16 @@ export function MandatoryAnnouncementDialog() {
       <Dialog open onOpenChange={() => undefined}>
         <DialogContent
           showCloseButton={false}
-          overlayClassName='bg-black/55 supports-backdrop-filter:backdrop-blur-sm'
-          className='gap-0 overflow-hidden p-0 sm:max-w-md'
+          overlayClassName='bg-transparent supports-backdrop-filter:backdrop-blur-none'
+          className='pointer-events-none size-px gap-0 overflow-hidden border-0 bg-transparent p-0 opacity-0 shadow-none'
+          aria-busy='true'
         >
-          <DialogHeader className='border-b px-5 py-4 text-left'>
+          <DialogHeader>
             <DialogTitle>正在检查系统公告</DialogTitle>
             <DialogDescription>
               请稍候，正在同步你的阅读状态。
             </DialogDescription>
           </DialogHeader>
-          <div className='flex items-center gap-3 px-5 py-6'>
-            <LoaderCircle className='animate-spin' aria-hidden='true' />
-            <span className='text-sm'>同步中</span>
-          </div>
         </DialogContent>
       </Dialog>
     )
