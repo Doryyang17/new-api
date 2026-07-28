@@ -365,6 +365,16 @@ func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool, sortOpti
 	return channels, err
 }
 
+func GetChannelsForAvailabilitySchedule() ([]*Channel, error) {
+	var channels []*Channel
+	err := DB.
+		Select("id", "name", "status", "other_info", "settings", "channel_info").
+		Where("settings LIKE ?", "%\"availability_schedule\"%").
+		Order("id asc").
+		Find(&channels).Error
+	return channels, err
+}
+
 func GetChannelsByTag(tag string, idSort bool, selectAll bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {
 	var channels []*Channel
 	order := resolveChannelSortOptions(idSort, sortOptions)
@@ -568,13 +578,31 @@ func (channel *Channel) Update() error {
 			}
 		}
 	}
-	var err error
-	err = DB.Model(channel).Updates(channel).Error
-	if err != nil {
-		return err
-	}
-	DB.Model(channel).First(channel, "id = ?", channel.Id)
-	err = channel.UpdateAbilities(nil)
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var current Channel
+		if err := lockForUpdate(tx).Select("id", "settings").First(&current, "id = ?", channel.Id).Error; err != nil {
+			return err
+		}
+
+		if channel.OtherSettings != "" {
+			requestedSettings := dto.ChannelOtherSettings{}
+			currentSettings := dto.ChannelOtherSettings{}
+			requestedErr := common.UnmarshalJsonStr(channel.OtherSettings, &requestedSettings)
+			currentErr := common.UnmarshalJsonStr(current.OtherSettings, &currentSettings)
+			if requestedErr == nil && currentErr == nil {
+				requestedSettings.AvailabilitySchedule = currentSettings.AvailabilitySchedule
+				channel.SetOtherSettings(requestedSettings)
+			}
+		}
+
+		if err := tx.Model(channel).Updates(channel).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(channel).First(channel, "id = ?", channel.Id).Error; err != nil {
+			return err
+		}
+		return channel.UpdateAbilities(tx)
+	})
 	return err
 }
 
@@ -684,10 +712,10 @@ func handlerMultiKeyUpdate(channel *Channel, usingKey string, status int, reason
 			channel.ChannelInfo.MultiKeyDisabledReason[keyIndex] = reason
 			channel.ChannelInfo.MultiKeyDisabledTime[keyIndex] = common.GetTimestamp()
 		}
-		if !hasEnabledMultiKey(keys, channel.ChannelInfo.MultiKeyStatusList) {
+		if !hasEnabledMultiKey(len(keys), channel.ChannelInfo.MultiKeyStatusList) {
 			channel.Status = common.ChannelStatusAutoDisabled
 			info := channel.GetOtherInfo()
-			info["status_reason"] = "All keys are disabled"
+			info["status_reason"] = ChannelStatusReasonAllKeysDisabled
 			info["status_time"] = common.GetTimestamp()
 			channel.SetOtherInfo(info)
 		} else if status == common.ChannelStatusEnabled {
@@ -696,8 +724,14 @@ func handlerMultiKeyUpdate(channel *Channel, usingKey string, status int, reason
 	}
 }
 
-func hasEnabledMultiKey(keys []string, statusList map[int]int) bool {
-	for i := range keys {
+const ChannelStatusReasonAllKeysDisabled = "All keys are disabled"
+
+func (channel *Channel) HasEnabledMultiKey() bool {
+	return hasEnabledMultiKey(channel.ChannelInfo.MultiKeySize, channel.ChannelInfo.MultiKeyStatusList)
+}
+
+func hasEnabledMultiKey(keyCount int, statusList map[int]int) bool {
+	for i := 0; i < keyCount; i++ {
 		if statusList == nil {
 			return true
 		}
@@ -775,7 +809,14 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			channel.Status = status
 			shouldUpdateAbilities = true
 		}
-		err = channel.SaveWithoutKey()
+		updates := map[string]any{
+			"status":     channel.Status,
+			"other_info": channel.OtherInfo,
+		}
+		if channel.ChannelInfo.IsMultiKey {
+			updates["channel_info"] = channel.ChannelInfo
+		}
+		err = DB.Model(&Channel{}).Where("id = ?", channel.Id).Updates(updates).Error
 		if err != nil {
 			common.SysLog(fmt.Sprintf("failed to update channel status: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
 			return false
@@ -784,22 +825,141 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 	return true
 }
 
-func EnableChannelByTag(tag string) error {
-	err := DB.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusEnabled).Error
-	if err != nil {
-		return err
+// UpdateChannelStatusIfUnchanged applies a top-level status transition only
+// when the persisted channel still matches the snapshot used to decide it.
+// Multi-key availability is rechecked inside the write transaction because
+// channel_info may change without changing the channel's top-level status.
+func UpdateChannelStatusIfUnchanged(expected *Channel, status int, reason string) (changed bool, matched bool, err error) {
+	if expected == nil || expected.Id <= 0 {
+		return false, false, fmt.Errorf("渠道状态更新参数无效")
 	}
-	err = UpdateAbilityStatusByTag(tag, true)
-	return err
+	if expected.Status == status {
+		return false, true, nil
+	}
+
+	if common.MemoryCacheEnabled {
+		channelStatusLock.Lock()
+		defer channelStatusLock.Unlock()
+	}
+
+	info := expected.GetOtherInfo()
+	info["status_reason"] = reason
+	info["status_time"] = common.GetTimestamp()
+	otherInfoBytes, err := common.Marshal(info)
+	if err != nil {
+		return false, false, err
+	}
+	nextOtherInfo := string(otherInfoBytes)
+
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		var current Channel
+		if err := lockForUpdate(tx).
+			Select("id", "status", "other_info", "settings", "channel_info").
+			First(&current, "id = ?", expected.Id).Error; err != nil {
+			return err
+		}
+		if current.Status != expected.Status ||
+			current.OtherInfo != expected.OtherInfo ||
+			current.OtherSettings != expected.OtherSettings ||
+			!channelMultiKeyAvailabilityMatches(&current, expected) {
+			return nil
+		}
+
+		query := tx.Model(&Channel{}).
+			Where("id = ? AND status = ?", expected.Id, expected.Status)
+		if expected.OtherInfo == "" {
+			query = query.Where("(other_info = ? OR other_info IS NULL)", "")
+		} else {
+			query = query.Where("other_info = ?", expected.OtherInfo)
+		}
+		if expected.OtherSettings == "" {
+			query = query.Where("(settings = ? OR settings IS NULL)", "")
+		} else {
+			query = query.Where("settings = ?", expected.OtherSettings)
+		}
+
+		result := query.Updates(map[string]any{
+			"status":     status,
+			"other_info": nextOtherInfo,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		matched = true
+		changed = true
+		return tx.Model(&Ability{}).
+			Where("channel_id = ?", expected.Id).
+			Select("enabled").
+			Update("enabled", status == common.ChannelStatusEnabled).Error
+	})
+	if err != nil {
+		return false, false, err
+	}
+	if changed {
+		CacheUpdateChannelStatus(expected.Id, status)
+	}
+	return changed, matched, nil
+}
+
+func channelMultiKeyAvailabilityMatches(current *Channel, expected *Channel) bool {
+	if current.ChannelInfo.IsMultiKey != expected.ChannelInfo.IsMultiKey {
+		return false
+	}
+	if !current.ChannelInfo.IsMultiKey {
+		return true
+	}
+	if current.ChannelInfo.MultiKeySize != expected.ChannelInfo.MultiKeySize ||
+		len(current.ChannelInfo.MultiKeyStatusList) != len(expected.ChannelInfo.MultiKeyStatusList) {
+		return false
+	}
+	for index, status := range current.ChannelInfo.MultiKeyStatusList {
+		if expectedStatus, ok := expected.ChannelInfo.MultiKeyStatusList[index]; !ok || expectedStatus != status {
+			return false
+		}
+	}
+	return true
+}
+
+func EnableChannelByTag(tag string) error {
+	return updateChannelStatusByTag(tag, common.ChannelStatusEnabled, "manual tag operation")
 }
 
 func DisableChannelByTag(tag string) error {
-	err := DB.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusManuallyDisabled).Error
-	if err != nil {
-		return err
-	}
-	err = UpdateAbilityStatusByTag(tag, false)
-	return err
+	return updateChannelStatusByTag(tag, common.ChannelStatusManuallyDisabled, "manual tag operation")
+}
+
+func updateChannelStatusByTag(tag string, status int, reason string) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var channels []*Channel
+		if err := lockForUpdate(tx).
+			Select("id", "other_info").
+			Where("tag = ?", tag).
+			Find(&channels).Error; err != nil {
+			return err
+		}
+
+		statusTime := common.GetTimestamp()
+		for _, channel := range channels {
+			info := channel.GetOtherInfo()
+			info["status_reason"] = reason
+			info["status_time"] = statusTime
+			channel.SetOtherInfo(info)
+			if err := tx.Model(&Channel{}).Where("id = ? AND tag = ?", channel.Id, tag).Updates(map[string]any{
+				"status":     status,
+				"other_info": channel.OtherInfo,
+			}).Error; err != nil {
+				return err
+			}
+		}
+
+		return tx.Model(&Ability{}).
+			Where("tag = ?", tag).
+			Select("enabled").
+			Update("enabled", status == common.ChannelStatusEnabled).Error
+	})
 }
 
 func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, paramOverride *string, headerOverride *string) error {
@@ -971,6 +1131,11 @@ func (channel *Channel) ValidateSettings() error {
 			return err
 		}
 	}
+	if channelOtherSettings.AvailabilitySchedule != nil {
+		if _, err := channelOtherSettings.AvailabilitySchedule.Normalize(); err != nil {
+			return err
+		}
+	}
 	if channel.Type == constant.ChannelTypeAdvancedCustom && channelOtherSettings.UpstreamModelUpdateCheckEnabled {
 		if _, ok := channelOtherSettings.AdvancedCustom.ModelListRoute(); !ok {
 			return fmt.Errorf("advanced custom channels require a %s route when upstream model update checks are enabled", dto.AdvancedCustomModelListPath)
@@ -1021,6 +1186,138 @@ func (channel *Channel) SetOtherSettings(setting dto.ChannelOtherSettings) {
 		return
 	}
 	channel.OtherSettings = string(settingBytes)
+}
+
+const channelOtherSettingsMutationMaxAttempts = 5
+
+// MutateChannelOtherSettings merges one settings change against the latest
+// stored JSON and retries if another writer wins the compare-and-swap.
+func MutateChannelOtherSettings(channelID int, mutate func(*dto.ChannelOtherSettings) error) (string, error) {
+	return mutateChannelOtherSettings(channelID, nil, mutate)
+}
+
+// MutateChannelOtherSettingsAndModels persists a settings mutation and the
+// model list, then rebuilds Ability from the latest channel state in the same
+// transaction. The settings CAS preserves concurrent schedule edits, while the
+// successful UPDATE locks the channel row before its current status is read.
+func MutateChannelOtherSettingsAndModels(channelID int, models string, mutate func(*dto.ChannelOtherSettings) error) (string, error) {
+	if channelID <= 0 || mutate == nil {
+		return "", fmt.Errorf("渠道设置更新参数无效")
+	}
+
+	for range channelOtherSettingsMutationMaxAttempts {
+		var channel Channel
+		if err := DB.Select("id", "settings", "models").First(&channel, "id = ?", channelID).Error; err != nil {
+			return "", err
+		}
+
+		settings := dto.ChannelOtherSettings{}
+		if channel.OtherSettings != "" {
+			if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+				return "", err
+			}
+		}
+		if err := mutate(&settings); err != nil {
+			return "", err
+		}
+		settingsBytes, err := common.Marshal(settings)
+		if err != nil {
+			return "", err
+		}
+		nextSettings := string(settingsBytes)
+		if nextSettings == channel.OtherSettings && channel.Models == models {
+			return nextSettings, nil
+		}
+
+		matched := false
+		err = DB.Transaction(func(tx *gorm.DB) error {
+			query := tx.Model(&Channel{}).Where("id = ?", channelID)
+			if channel.OtherSettings == "" {
+				query = query.Where("(settings = ? OR settings IS NULL)", "")
+			} else {
+				query = query.Where("settings = ?", channel.OtherSettings)
+			}
+			result := query.Updates(map[string]any{
+				"models":   models,
+				"settings": nextSettings,
+			})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return nil
+			}
+
+			var current Channel
+			if err := lockForUpdate(tx).First(&current, "id = ?", channelID).Error; err != nil {
+				return err
+			}
+			if err := current.UpdateAbilities(tx); err != nil {
+				return err
+			}
+			matched = true
+			return nil
+		})
+		if err != nil {
+			return "", err
+		}
+		if matched {
+			return nextSettings, nil
+		}
+	}
+
+	return "", fmt.Errorf("渠道 %d 设置正被并发修改，请重试", channelID)
+}
+
+func mutateChannelOtherSettings(channelID int, models *string, mutate func(*dto.ChannelOtherSettings) error) (string, error) {
+	if channelID <= 0 || mutate == nil {
+		return "", fmt.Errorf("渠道设置更新参数无效")
+	}
+
+	for range channelOtherSettingsMutationMaxAttempts {
+		var channel Channel
+		if err := DB.Select("id", "settings", "models").First(&channel, "id = ?", channelID).Error; err != nil {
+			return "", err
+		}
+
+		settings := dto.ChannelOtherSettings{}
+		if channel.OtherSettings != "" {
+			if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+				return "", err
+			}
+		}
+		if err := mutate(&settings); err != nil {
+			return "", err
+		}
+		settingsBytes, err := common.Marshal(settings)
+		if err != nil {
+			return "", err
+		}
+		nextSettings := string(settingsBytes)
+		if nextSettings == channel.OtherSettings && (models == nil || channel.Models == *models) {
+			return nextSettings, nil
+		}
+
+		updates := map[string]any{"settings": nextSettings}
+		if models != nil {
+			updates["models"] = *models
+		}
+		query := DB.Model(&Channel{}).Where("id = ?", channelID)
+		if channel.OtherSettings == "" {
+			query = query.Where("(settings = ? OR settings IS NULL)", "")
+		} else {
+			query = query.Where("settings = ?", channel.OtherSettings)
+		}
+		result := query.Updates(updates)
+		if result.Error != nil {
+			return "", result.Error
+		}
+		if result.RowsAffected == 1 {
+			return nextSettings, nil
+		}
+	}
+
+	return "", fmt.Errorf("渠道 %d 设置正被并发修改，请重试", channelID)
 }
 
 func (channel *Channel) GetParamOverride() map[string]interface{} {

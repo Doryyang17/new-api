@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
+import { CalendarClockIcon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import {
@@ -59,6 +61,7 @@ import { CHANNEL_STATUS_CONFIG, MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   formatRelativeTime,
   formatResponseTime,
+  evaluateChannelAvailability,
   getBalanceVariant,
   getChannelTypeIcon,
   getChannelTypeLabel,
@@ -67,6 +70,7 @@ import {
   parseModelsList,
   parseGroupsList,
   parseChannelSettings,
+  parseChannelAvailabilitySchedule,
   handleUpdateChannelField,
   handleUpdateTagField,
   handleUpdateChannelBalance,
@@ -511,19 +515,17 @@ function BalanceCell({ channel }: { channel: Channel }) {
 /**
  * Generate channels columns configuration
  */
-export function useChannelsColumns(
-  options: {
-    enableSelection?: boolean
-  } = {}
-): ColumnDef<Channel>[] {
+export function useChannelsColumns(options: {
+  enableSelection?: boolean
+  availabilityNow: number
+}): ColumnDef<Channel>[] {
   const { t } = useTranslation()
   const { sensitiveVisible } = useChannels()
   const enableSelection = options.enableSelection ?? true
   const locale = 'zh'
-  // The column definitions only depend on the translation function, the active
-  // locale, and sensitive-data visibility. Memoizing keeps the array (and every
-  // cell renderer reference) stable across unrelated re-renders, so react-table
-  // does not invalidate the whole row model on each parent render.
+  // Keep every cell renderer stable across unrelated parent renders. The
+  // low-frequency availability clock is an intentional dependency so time-based
+  // status badges cross their configured boundaries even when row data is shared.
   return useMemo<ColumnDef<Channel>[]>(
     () => [
       // Checkbox column
@@ -878,8 +880,17 @@ export function useChannelsColumns(
               ? `${t(config.label)} (${enabledCount}/${keySize})`
               : t(config.label)
 
-          // Auto-disabled: show reason and time tooltip
-          if (status === 3) {
+          let statusBadge = (
+            <StatusBadge
+              label={label}
+              variant={config.variant}
+              size='sm'
+              copyable={false}
+            />
+          )
+
+          // Disabled channels retain the native status reason and timestamp.
+          if (status !== 1) {
             let statusReason = ''
             let statusTime = ''
             try {
@@ -897,7 +908,7 @@ export function useChannelsColumns(
             }
 
             if (statusReason || statusTime) {
-              return (
+              statusBadge = (
                 <TooltipProvider delay={100}>
                   <Tooltip>
                     <TooltipTrigger render={<span />}>
@@ -928,13 +939,66 @@ export function useChannelsColumns(
             }
           }
 
+          const availabilitySchedule = parseChannelAvailabilitySchedule(
+            channel.settings
+          )
+          if (!availabilitySchedule?.enabled) {
+            return statusBadge
+          }
+
+          const availability = evaluateChannelAvailability(
+            availabilitySchedule,
+            new Date(options.availabilityNow)
+          )
+          let availabilityStatus = '时间配置待修正'
+          let availabilityVariant: StatusBadgeProps['variant'] = 'danger'
+          let nextAction = '-'
+          if (availability?.inWindow) {
+            availabilityStatus = '当前处于可用时段'
+            availabilityVariant = 'success'
+            nextAction = `${availability.nextTime} 自动禁用`
+          } else if (availability) {
+            availabilityStatus = '当前处于禁用时段'
+            availabilityVariant = 'neutral'
+            nextAction = `${availability.nextTime} 自动启用`
+          }
+
           return (
-            <StatusBadge
-              label={label}
-              variant={config.variant}
-              size='sm'
-              copyable={false}
-            />
+            <div className='flex max-w-full flex-wrap items-center gap-1'>
+              {statusBadge}
+              <TooltipProvider delay={100}>
+                <Tooltip>
+                  <TooltipTrigger render={<span />}>
+                    <StatusBadge
+                      variant={availabilityVariant}
+                      size='sm'
+                      copyable={false}
+                    >
+                      <HugeiconsIcon
+                        icon={CalendarClockIcon}
+                        strokeWidth={2}
+                        className='size-3.5 shrink-0'
+                        aria-hidden='true'
+                      />
+                      <span className='truncate'>
+                        {availabilitySchedule.start}-{availabilitySchedule.end}
+                      </span>
+                    </StatusBadge>
+                  </TooltipTrigger>
+                  <TooltipContent side='top' className='max-w-xs'>
+                    <div className='space-y-1 text-xs'>
+                      <div>{availabilityStatus}</div>
+                      <div className='text-muted-foreground'>
+                        下一动作：{nextAction}
+                      </div>
+                      <div className='text-muted-foreground'>
+                        时区：{availabilitySchedule.timezone}
+                      </div>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
           )
         },
         filterFn: (row, id, value) => {
@@ -950,7 +1014,7 @@ export function useChannelsColumns(
           }
           return false
         },
-        size: 120,
+        size: 180,
         enableSorting: false,
       },
 
@@ -1152,6 +1216,6 @@ export function useChannelsColumns(
         meta: { pinned: 'right' as const },
       },
     ],
-    [enableSelection, t, locale, sensitiveVisible]
+    [enableSelection, t, locale, options.availabilityNow, sensitiveVisible]
   )
 }

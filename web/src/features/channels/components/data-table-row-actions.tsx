@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { CalendarClockIcon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Row } from '@tanstack/react-table'
 import {
@@ -121,6 +123,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const handleQueryBalance = () => {
     setCurrentRow(channel)
     setOpen('balance-query')
+  }
+
+  const handleAvailabilitySchedule = () => {
+    setCurrentRow(channel)
+    setOpen('availability-schedule')
   }
 
   const handleFetchModels = () => {
@@ -286,6 +293,17 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             {t('Query Balance')}
             <DropdownMenuShortcut>
               <DollarSign size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={handleAvailabilitySchedule}>
+            可用时间
+            <DropdownMenuShortcut>
+              <HugeiconsIcon
+                icon={CalendarClockIcon}
+                strokeWidth={2}
+                className='size-4'
+              />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
 

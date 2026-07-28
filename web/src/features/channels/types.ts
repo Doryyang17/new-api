@@ -40,7 +40,7 @@ export const channelSchema = z.object({
   key: z.string(),
   openai_organization: z.string().nullish(),
   test_model: z.string().nullish(),
-  status: z.number(), // 1: enabled, 0: manual disabled, 2: auto disabled
+  status: z.number(), // 1: enabled, 2: manual disabled, 3: auto disabled
   name: z.string(),
   weight: z.number().nullish(),
   created_time: z.number(),
@@ -106,7 +106,29 @@ export interface ChannelOtherSettings {
   upstream_model_update_ignored_models?: string[]
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
+  availability_schedule?: ChannelAvailabilitySchedule
   advanced_custom?: AdvancedCustomConfig
+}
+
+export interface ChannelAvailabilitySchedule {
+  enabled: boolean
+  start: string
+  end: string
+  timezone: string
+}
+
+export interface ChannelAvailabilityUpdateResult {
+  schedule: ChannelAvailabilitySchedule
+  in_window: boolean
+  next_transition_at: number
+  status: number
+  status_changed: boolean
+}
+
+export interface ChannelAvailabilityUpdateResponse {
+  success: boolean
+  message?: string
+  data?: ChannelAvailabilityUpdateResult
 }
 
 export interface AdvancedCustomConfig {

@@ -250,6 +250,28 @@ func CacheGetChannel(id int) (*Channel, error) {
 	return c, nil
 }
 
+// ChannelCacheDiffers compares a database snapshot with the cached channel
+// while holding the same status/cache locks used by native status updates.
+func ChannelCacheDiffers(channel *Channel) bool {
+	if !common.MemoryCacheEnabled {
+		return false
+	}
+	if channel == nil {
+		return true
+	}
+
+	channelStatusLock.Lock()
+	defer channelStatusLock.Unlock()
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	cached, ok := channelsIDM[channel.Id]
+	if !ok || cached == nil {
+		return true
+	}
+	return cached.Status != channel.Status || cached.OtherSettings != channel.OtherSettings
+}
+
 func CacheGetChannelInfo(id int) (*ChannelInfo, error) {
 	if !common.MemoryCacheEnabled {
 		channel, err := GetChannelById(id, true)

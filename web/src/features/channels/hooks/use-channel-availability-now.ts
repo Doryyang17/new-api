@@ -16,13 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-// Re-export all library functions
-export * from './channel-actions'
-export * from './channel-availability'
-export * from './advanced-custom'
-export * from './channel-form-errors'
-export * from './channel-form'
-export * from './channel-type-config'
-export * from './channel-utils'
-export * from './multi-key-utils'
-export * from './model-mapping-validation'
+import { useEffect, useState } from 'react'
+
+import { CHANNEL_AVAILABILITY_REFRESH_INTERVAL_MS } from '../lib/channel-availability'
+
+export function useChannelAvailabilityNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!active) return
+
+    setNow(Date.now())
+    const intervalId = window.setInterval(
+      () => setNow(Date.now()),
+      CHANNEL_AVAILABILITY_REFRESH_INTERVAL_MS
+    )
+    return () => window.clearInterval(intervalId)
+  }, [active])
+
+  return now
+}

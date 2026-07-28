@@ -126,6 +126,10 @@ func main() {
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
 
+	// Reconcile each channel's configured daily availability window on every
+	// serving node so local routing caches switch promptly at the boundaries.
+	service.StartChannelAvailabilityScheduler()
+
 	// Independent check-in bonuses expire at the next local midnight.
 	service.StartCheckinBonusExpiryTask()
 

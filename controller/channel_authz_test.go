@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -156,6 +157,37 @@ func TestChannelStatusValidation(t *testing.T) {
 	assert.True(t, isManageableChannelStatus(common.ChannelStatusManuallyDisabled))
 	assert.False(t, isManageableChannelStatus(common.ChannelStatusAutoDisabled))
 	assert.False(t, isManageableChannelStatus(0))
+}
+
+func TestPreserveChannelAvailabilitySchedule(t *testing.T) {
+	origin := &model.Channel{}
+	origin.SetOtherSettings(dto.ChannelOtherSettings{
+		AvailabilitySchedule: &dto.ChannelAvailabilitySchedule{
+			Enabled:  true,
+			Start:    "08:00",
+			End:      "12:00",
+			Timezone: "Asia/Shanghai",
+		},
+	})
+	updated := &model.Channel{}
+	updated.SetOtherSettings(dto.ChannelOtherSettings{
+		AllowSpeed: true,
+		AvailabilitySchedule: &dto.ChannelAvailabilitySchedule{
+			Enabled:  true,
+			Start:    "01:00",
+			End:      "02:00",
+			Timezone: "UTC",
+		},
+	})
+
+	preserveChannelAvailabilitySchedule(updated, origin)
+
+	settings := updated.GetOtherSettings()
+	assert.True(t, settings.AllowSpeed)
+	require.NotNil(t, settings.AvailabilitySchedule)
+	assert.Equal(t, "08:00", settings.AvailabilitySchedule.Start)
+	assert.Equal(t, "12:00", settings.AvailabilitySchedule.End)
+	assert.Equal(t, "Asia/Shanghai", settings.AvailabilitySchedule.Timezone)
 }
 
 // TestChannelFieldsAreClassified guards the fail-closed sensitivity check: every

@@ -350,6 +350,102 @@ func TestFailedAdvancedCustomDetectionDoesNotStageFullRemoval(t *testing.T) {
 	require.Equal(t, "gpt-4.1,o3", reloaded.Models)
 }
 
+func TestUpstreamModelSettingsUpdatePreservesConcurrentAvailabilitySchedule(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	channel := &model.Channel{
+		Name:   "concurrent settings update",
+		Key:    "sk-test",
+		Status: common.ChannelStatusEnabled,
+		Models: "gpt-old",
+	}
+	staleSettings := dto.ChannelOtherSettings{
+		UpstreamModelUpdateCheckEnabled: true,
+	}
+	channel.SetOtherSettings(staleSettings)
+	require.NoError(t, db.Create(channel).Error)
+
+	schedule := dto.ChannelAvailabilitySchedule{
+		Enabled:  true,
+		Start:    "08:00",
+		End:      "12:00",
+		Timezone: "Asia/Shanghai",
+	}
+	latestSettings := staleSettings
+	latestSettings.AvailabilitySchedule = &schedule
+	concurrent := &model.Channel{}
+	concurrent.SetOtherSettings(latestSettings)
+	require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("settings", concurrent.OtherSettings).Error)
+
+	staleSettings.UpstreamModelUpdateLastCheckTime = 12345
+	staleSettings.UpstreamModelUpdateLastDetectedModels = []string{"gpt-new"}
+	channel.Models = "gpt-old,gpt-new"
+	require.NoError(t, updateChannelUpstreamModelSettings(channel, staleSettings, true))
+
+	persisted, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	persistedSettings := persisted.GetOtherSettings()
+	require.NotNil(t, persistedSettings.AvailabilitySchedule)
+	require.Equal(t, schedule, *persistedSettings.AvailabilitySchedule)
+	require.Equal(t, int64(12345), persistedSettings.UpstreamModelUpdateLastCheckTime)
+	require.Equal(t, []string{"gpt-new"}, persistedSettings.UpstreamModelUpdateLastDetectedModels)
+	require.Equal(t, "gpt-old,gpt-new", persisted.Models)
+}
+
+func TestUpstreamModelUpdateKeepsAbilitiesDisabledAfterConcurrentStatusChange(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	settings := dto.ChannelOtherSettings{
+		UpstreamModelUpdateLastDetectedModels: []string{"gpt-new"},
+	}
+	channel := &model.Channel{
+		Name:   "stale enabled model update",
+		Key:    "sk-test",
+		Status: common.ChannelStatusEnabled,
+		Models: "gpt-old",
+		Group:  "default",
+	}
+	channel.SetOtherSettings(settings)
+	require.NoError(t, db.Create(channel).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group:     "default",
+		Model:     "gpt-old",
+		ChannelId: channel.Id,
+		Enabled:   true,
+	}).Error)
+
+	// Keep channel as the stale enabled snapshot held by the upstream request,
+	// while the persisted channel has already crossed its closing boundary.
+	require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", channel.Id).
+		Update("status", common.ChannelStatusManuallyDisabled).Error)
+	require.NoError(t, db.Model(&model.Ability{}).Where("channel_id = ?", channel.Id).
+		Update("enabled", false).Error)
+
+	added, removed, remainingAdd, remainingRemove, changed, err := applyChannelUpstreamModelUpdates(
+		channel,
+		[]string{"gpt-new"},
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, []string{"gpt-new"}, added)
+	require.Empty(t, removed)
+	require.Empty(t, remainingAdd)
+	require.Empty(t, remainingRemove)
+
+	persisted, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	require.Equal(t, common.ChannelStatusManuallyDisabled, persisted.Status)
+	require.Equal(t, "gpt-old,gpt-new", persisted.Models)
+
+	var abilities []model.Ability
+	require.NoError(t, db.Where("channel_id = ?", channel.Id).Order("model asc").Find(&abilities).Error)
+	require.Len(t, abilities, 2)
+	require.Equal(t, "gpt-new", abilities[0].Model)
+	require.Equal(t, "gpt-old", abilities[1].Model)
+	require.False(t, abilities[0].Enabled)
+	require.False(t, abilities[1].Enabled)
+}
+
 func TestFetchModelsUsesSharedChannelFetchBehavior(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {

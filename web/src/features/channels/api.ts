@@ -25,6 +25,8 @@ import type {
   BatchSetTagParams,
   Channel,
   ChannelBalanceResponse,
+  ChannelAvailabilitySchedule,
+  ChannelAvailabilityUpdateResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
   CopyChannelParams,
@@ -149,6 +151,21 @@ export async function updateChannelStatus(
   const res = await api.post(
     `/api/channel/${id}/status`,
     { status },
+    channelActionConfig()
+  )
+  return res.data
+}
+
+/**
+ * Configure and immediately reconcile a channel's daily availability window.
+ */
+export async function updateChannelAvailabilitySchedule(
+  id: number,
+  schedule: ChannelAvailabilitySchedule
+): Promise<ChannelAvailabilityUpdateResponse> {
+  const res = await api.put(
+    `/api/channel/${id}/availability-schedule`,
+    schedule,
     channelActionConfig()
   )
   return res.data

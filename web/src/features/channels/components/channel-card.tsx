@@ -24,7 +24,11 @@ import { GroupBadge } from '@/components/group-badge'
 import { cn } from '@/lib/utils'
 
 import { CHANNEL_STATUS } from '../constants'
-import { isTagAggregateRow, parseGroupsList } from '../lib'
+import {
+  isTagAggregateRow,
+  parseChannelAvailabilitySchedule,
+  parseGroupsList,
+} from '../lib'
 import type { Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
 import { useChannels } from './channels-provider'
@@ -39,13 +43,15 @@ const SENSITIVE_MASK = '••••'
  * priority/weight spinners, balance refresh, response/test times, tag
  * expand-collapse, and the per-row (or per-tag) actions menu.
  */
-function ChannelCardComponent({
-  row,
-  isSelected,
-}: {
+type ChannelCardProps = {
   row: Row<Channel>
   isSelected: boolean
-}) {
+  // The status cell is time-derived; changing this prop invalidates React.memo
+  // even when TanStack Query structurally shares an otherwise unchanged row.
+  availabilityNow: number
+}
+
+function ChannelCardComponent({ row, isSelected }: ChannelCardProps) {
   const { t } = useTranslation()
   const { sensitiveVisible } = useChannels()
   const isTagRow = isTagAggregateRow(row.original)
@@ -79,12 +85,16 @@ function ChannelCardComponent({
   const testCell = renderCell('test_time')
 
   const labelClass = 'text-muted-foreground text-[11px] font-medium select-none'
+  const availabilitySchedule = parseChannelAvailabilitySchedule(
+    row.original.settings
+  )
 
   // In card view the enable/disable state is already conveyed by the inline
   // power toggle, so the plain "Enabled"/"Disabled" badge is redundant. Keep
-  // only the informative states (e.g. auto-disabled, unknown) and tag rows.
+  // informative states, tag rows, and configured availability windows.
   const showStatusBadge =
     isTagRow ||
+    availabilitySchedule?.enabled === true ||
     (row.original.status !== CHANNEL_STATUS.ENABLED &&
       row.original.status !== CHANNEL_STATUS.MANUAL_DISABLED)
 

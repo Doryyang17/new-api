@@ -52,9 +52,13 @@ import {
   CHANNEL_STATUS,
   CHANNEL_STATUS_OPTIONS,
 } from '../constants'
+import { useChannelAvailabilityNow } from '../hooks/use-channel-availability-now'
 import {
   channelsQueryKeys,
   aggregateChannelsByTag,
+  CHANNEL_AVAILABILITY_REFRESH_INTERVAL_MS,
+  hasEnabledChannelAvailability,
+  shouldRefreshChannelAvailability,
   isTagAggregateRow,
   getChannelTypeIcon,
   getChannelTypeLabel,
@@ -219,7 +223,7 @@ export function ChannelsTable() {
 
   // Fetch channels data
   // eslint-disable-next-line @tanstack/query/exhaustive-deps
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isPlaceholderData } = useQuery({
     queryKey: channelsQueryKeys.list({
       keyword: globalFilter,
       model: modelFilter,
@@ -287,7 +291,17 @@ export function ChannelsTable() {
       }
     },
     placeholderData: (previousData) => previousData,
+    refetchInterval: (query) => {
+      const items = query.state.data?.data?.items ?? []
+      return shouldRefreshChannelAvailability(items, statusFilter)
+        ? CHANNEL_AVAILABILITY_REFRESH_INTERVAL_MS
+        : false
+    },
   })
+
+  const availabilityNow = useChannelAvailabilityNow(
+    hasEnabledChannelAvailability(data?.data?.items ?? [])
+  )
 
   // Apply tag aggregation if tag mode is enabled
   const channels = useMemo(() => {
@@ -304,7 +318,10 @@ export function ChannelsTable() {
   const typeCounts = data?.data?.type_counts
 
   // Columns configuration
-  const columns = useChannelsColumns({ enableSelection: batchMode })
+  const columns = useChannelsColumns({
+    enableSelection: batchMode,
+    availabilityNow,
+  })
 
   // React Table instance
   const { table } = useDataTable({
@@ -410,7 +427,7 @@ export function ChannelsTable() {
       table={table}
       columns={columns}
       isLoading={isLoading}
-      isFetching={isFetching}
+      isFetching={isFetching && isPlaceholderData}
       emptyTitle={t('No Channels Found')}
       emptyDescription={t(
         'No channels available. Create your first channel to get started.'
@@ -419,7 +436,11 @@ export function ChannelsTable() {
       enableCardView
       viewModeStorageKey={CHANNELS_VIEW_MODE_STORAGE_KEY}
       renderCard={(row, { isSelected }) => (
-        <ChannelCard row={row} isSelected={isSelected} />
+        <ChannelCard
+          row={row}
+          isSelected={isSelected}
+          availabilityNow={availabilityNow}
+        />
       )}
       cardGridClassName='grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3'
       applyHeaderSize

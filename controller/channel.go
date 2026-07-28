@@ -987,6 +987,9 @@ func UpdateChannel(c *gin.Context) {
 
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
+	if _, settingsProvided := requestData["settings"]; settingsProvided {
+		preserveChannelAvailabilitySchedule(&channel.Channel, originChannel)
+	}
 
 	if channelHasSensitiveChanges(&channel, originChannel, requestData) &&
 		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
@@ -1145,6 +1148,41 @@ func UpdateChannelStatus(c *gin.Context) {
 		"message": "",
 		"data":    changed,
 	})
+}
+
+func preserveChannelAvailabilitySchedule(channel *model.Channel, origin *model.Channel) {
+	updatedSettings := channel.GetOtherSettings()
+	originSettings := origin.GetOtherSettings()
+	updatedSettings.AvailabilitySchedule = originSettings.AvailabilitySchedule
+	channel.SetOtherSettings(updatedSettings)
+}
+
+func UpdateChannelAvailabilitySchedule(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	req := dto.ChannelAvailabilitySchedule{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+
+	result, err := service.UpdateChannelAvailabilitySchedule(id, req, time.Now())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "channel.availability_schedule_update", map[string]interface{}{
+		"id":             id,
+		"enabled":        result.Schedule.Enabled,
+		"start":          result.Schedule.Start,
+		"end":            result.Schedule.End,
+		"timezone":       result.Schedule.Timezone,
+		"status_changed": result.StatusChanged,
+	})
+	common.ApiSuccess(c, result)
 }
 
 func BatchUpdateChannelStatus(c *gin.Context) {

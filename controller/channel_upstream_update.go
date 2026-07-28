@@ -461,14 +461,26 @@ func fetchAdvancedCustomUpstreamModelIDs(channel *model.Channel, baseURL string)
 }
 
 func updateChannelUpstreamModelSettings(channel *model.Channel, settings dto.ChannelOtherSettings, updateModels bool) error {
-	channel.SetOtherSettings(settings)
-	updates := map[string]interface{}{
-		"settings": channel.OtherSettings,
+	mutate := func(current *dto.ChannelOtherSettings) error {
+		current.UpstreamModelUpdateLastCheckTime = settings.UpstreamModelUpdateLastCheckTime
+		current.UpstreamModelUpdateLastDetectedModels = settings.UpstreamModelUpdateLastDetectedModels
+		current.UpstreamModelUpdateLastRemovedModels = settings.UpstreamModelUpdateLastRemovedModels
+		current.UpstreamModelUpdateIgnoredModels = settings.UpstreamModelUpdateIgnoredModels
+		return nil
 	}
+
+	var updatedSettings string
+	var err error
 	if updateModels {
-		updates["models"] = channel.Models
+		updatedSettings, err = model.MutateChannelOtherSettingsAndModels(channel.Id, channel.Models, mutate)
+	} else {
+		updatedSettings, err = model.MutateChannelOtherSettings(channel.Id, mutate)
 	}
-	return model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Updates(updates).Error
+	if err != nil {
+		return err
+	}
+	channel.OtherSettings = updatedSettings
+	return nil
 }
 
 func checkAndPersistChannelUpstreamModelUpdates(
@@ -511,11 +523,6 @@ func checkAndPersistChannelUpstreamModelUpdates(
 
 	if err = updateChannelUpstreamModelSettings(channel, *settings, modelsChanged); err != nil {
 		return false, autoAdded, err
-	}
-	if modelsChanged {
-		if err = channel.UpdateAbilities(nil); err != nil {
-			return true, autoAdded, err
-		}
 	}
 	return modelsChanged, autoAdded, nil
 }
@@ -956,12 +963,6 @@ func applyChannelUpstreamModelUpdates(
 
 	if err := updateChannelUpstreamModelSettings(channel, settings, modelsChanged); err != nil {
 		return nil, nil, nil, nil, false, err
-	}
-
-	if modelsChanged {
-		if err := channel.UpdateAbilities(nil); err != nil {
-			return addModels, removeModels, remainingModels, remainingRemoveModels, true, err
-		}
 	}
 	return addModels, removeModels, remainingModels, remainingRemoveModels, modelsChanged, nil
 }
