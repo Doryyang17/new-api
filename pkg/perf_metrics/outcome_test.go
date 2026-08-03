@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
-	"github.com/QuantumNous/new-api/service/relayconvert"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +32,7 @@ func TestShouldRecordRelayFailure(t *testing.T) {
 	}, http.StatusInternalServerError)
 	mappedServiceError.SetMappedStatusCode(http.StatusBadRequest)
 
-	_, reasoningConversionErr := relayconvert.OpenAIChatRequestToClaudeMessages(nil, dto.GeneralOpenAIRequest{
+	_, reasoningConversionErr := relayconvert.OpenAIChatRequestToClaudeMessages(context.Background(), nil, dto.GeneralOpenAIRequest{
 		Model:     "claude-test",
 		Messages:  []dto.Message{{Role: "user", Content: "hello"}},
 		MaxTokens: common.GetPointer[uint](16),

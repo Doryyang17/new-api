@@ -23,8 +23,8 @@ import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
 import { RichContent } from '@/components/rich-content'
 import { useTheme } from '@/context/theme-provider'
-import { isLikelyHtml } from '@/lib/content-format'
 import { getStatus } from '@/lib/api'
+import { isLikelyHtml } from '@/lib/content-format'
 import {
   getSystemAvailabilityRefreshDelayMs,
   isSystemCurfewActive,

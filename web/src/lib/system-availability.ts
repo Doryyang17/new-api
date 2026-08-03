@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 export const SYSTEM_CURFEW_CODE = 'system_curfew'
 export const SYSTEM_AVAILABILITY_EVENT = 'new-api-system-availability-change'
 const AVAILABILITY_SECONDS_PER_DAY = 24 * 60 * 60
@@ -141,7 +140,9 @@ function getCurrentSecondsInTimezone(timezone: unknown): number | null {
       second: '2-digit',
       hourCycle: 'h23',
     }).formatToParts(new Date())
-    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+    const values = Object.fromEntries(
+      parts.map((part) => [part.type, part.value])
+    )
     return (
       Number(values.hour) * 3600 +
       Number(values.minute) * 60 +
@@ -163,9 +164,7 @@ export function getSystemAvailabilityRefreshDelayMs(): number {
   const status = getSystemAvailabilityStatus()
   if (!status?.enabled) return DEFAULT_AVAILABILITY_REFRESH_MS
 
-  const retryAfterSeconds = normalizePositiveSeconds(
-    status.retry_after_seconds
-  )
+  const retryAfterSeconds = normalizePositiveSeconds(status.retry_after_seconds)
   if (status.unavailable && retryAfterSeconds) {
     return Math.max(1000, (retryAfterSeconds + 1) * 1000)
   }

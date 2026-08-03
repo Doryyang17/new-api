@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,7 +17,7 @@ const (
 
 func configureTrustedProxyPolicy(engine *gin.Engine) error {
 	rawProxies := strings.TrimSpace(os.Getenv(trustedProxiesEnv))
-	if err := configureTrustedProxies(engine); err != nil {
+	if err := middleware.ConfigureTrustedProxies(engine); err != nil {
 		return err
 	}
 

@@ -88,13 +88,8 @@ func (w *WalletFunding) Reserve(amount int) error {
 	if amount <= 0 {
 		return nil
 	}
-	quota, err := model.GetUserQuota(w.userId, false)
-	if err != nil {
-		return err
-	}
-	if quota < amount {
-		return fmt.Errorf("insufficient user quota for wallet reservation: have=%d need=%d", quota, amount)
-	}
+	// 与结算补扣保持一致：追加预扣必须完整入账，余额不足时允许形成欠费，
+	// 以保证日志额度和钱包变动可对账。DecreaseUserQuota 仅在数据库错误时失败。
 	return w.PreConsume(amount)
 }
 

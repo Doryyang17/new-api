@@ -49,6 +49,10 @@ import {
   postTelegramBindResult,
   startOAuthBindResponseDeadline,
 } from '@/features/auth/lib/oauth-bind-window'
+import {
+  getOAuthSessionStorage,
+  resolveOAuthCallbackMode,
+} from '@/features/auth/lib/oauth-callback-mode'
 import { getRegistrationFingerprint } from '@/features/auth/lib/registration-fingerprint'
 import { api, applyAuthBundle, isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
@@ -197,8 +201,19 @@ function OAuthCallback() {
     flow_token?: string
     error_code?: string
   }
-  const mode: 'login' | 'bind' =
-    typeof window !== 'undefined' && window.opener ? 'bind' : 'login'
+  const callbackState = search.state ?? ''
+  const isTelegramBindCallback =
+    provider === 'telegram' &&
+    (search.telegram_bind === 'success' || search.telegram_bind === 'error')
+  let mode: 'login' | 'bind' = 'login'
+  if (isTelegramBindCallback) {
+    mode = 'bind'
+  } else if (typeof window !== 'undefined') {
+    mode = resolveOAuthCallbackMode(provider, callbackState, {
+      opener: window.opener,
+      storage: getOAuthSessionStorage(window),
+    })
+  }
   const [pendingRegistration, setPendingRegistration] =
     useState<PendingOAuthRegistration | null>(() =>
       readStoredPendingOAuthRegistration(provider)
@@ -223,7 +238,7 @@ function OAuthCallback() {
     if (typeof window === 'undefined') return
 
     const code = search.code ?? ''
-    const state = search.state ?? ''
+    const state = callbackState
     const telegramCallback =
       provider === 'telegram'
         ? parseTelegramBindCallback({
@@ -373,6 +388,7 @@ function OAuthCallback() {
       safeNavigate('/sign-in', '/sign-in')
     })()
   }, [
+    callbackState,
     mode,
     pendingRegistration,
     navigate,
@@ -383,7 +399,6 @@ function OAuthCallback() {
     search.error_description,
     search.flow_token,
     search.redirect,
-    search.state,
     search.telegram_bind,
   ])
 

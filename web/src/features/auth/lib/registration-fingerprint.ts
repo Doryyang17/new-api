@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 const REGISTRATION_FINGERPRINT_KEY = 'auth:registration-fingerprint'
 
 function createRegistrationFingerprint(): string {

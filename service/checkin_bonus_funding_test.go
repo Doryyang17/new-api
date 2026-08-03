@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -333,7 +333,7 @@ func TestCheckinBonusFundingDoesNotSwitchToLateBonusAfterBasePreConsume(t *testi
 		assert.Zero(t, usageCount)
 	})
 
-	t.Run("late bonus cannot bypass the locked wallet balance", func(t *testing.T) {
+	t.Run("late bonus does not replace the locked wallet during arrears", func(t *testing.T) {
 		truncate(t)
 		const userId = 546
 		seedUser(t, userId, 100)
@@ -348,11 +348,14 @@ func TestCheckinBonusFundingDoesNotSwitchToLateBonusAfterBasePreConsume(t *testi
 		session, apiErr := NewBillingSession(ctx, info, 80)
 		require.Nil(t, apiErr)
 		bonus := seedFundingBonus(t, userId, 100, time.Now().Add(time.Hour))
-		require.Error(t, session.Reserve(150))
+		require.NoError(t, session.Reserve(150))
+		require.NoError(t, session.Settle(150))
 
-		assert.Equal(t, 20, walletQuota(t, userId))
+		assert.Equal(t, -50, walletQuota(t, userId))
 		require.NoError(t, model.DB.First(bonus, bonus.Id).Error)
 		assert.Equal(t, 100, bonus.RemainingAmount)
+		assert.Zero(t, info.CheckinBonusConsumed)
+		assert.Equal(t, 150, info.OriginalFundingConsumed)
 	})
 
 	t.Run("subscription reserve keeps the original funding mode", func(t *testing.T) {

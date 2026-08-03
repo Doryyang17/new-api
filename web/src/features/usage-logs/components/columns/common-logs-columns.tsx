@@ -46,7 +46,6 @@ import {
   formatModelName,
   getTieredBillingSummary,
   hasAnyCacheTokens,
-  isProbePenaltyLog,
   parseLogOther,
   isViolationFeeLog,
   renderAuditContent,
@@ -59,6 +58,7 @@ import {
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
 import { DetailsDialog } from '../dialogs/details-dialog'
+import { LogCostDisplay } from '../log-cost-display'
 import { ModelBadge } from '../model-badge'
 import { TimingMetricsCell, StreamTpsCell } from '../timing-metrics-cell'
 import { useUsageLogsContext } from '../usage-logs-provider'
@@ -92,52 +92,6 @@ function getGroupRatio(other: LogOtherData | null): number | null {
   }
 
   return null
-}
-
-function splitQuotaDisplay(value: string): { prefix: string; amount: string } {
-  const match = value.match(/^([^0-9+\-.,\s]+)(.+)$/)
-  if (!match) return { prefix: '', amount: value }
-  return { prefix: match[1], amount: match[2] }
-}
-
-function renderProbePenaltyIcon() {
-  return (
-    <span
-      role='img'
-      aria-label='测活惩罚扣费'
-      title='测活惩罚扣费'
-      className='inline-flex size-5 shrink-0 items-center justify-center rounded-[4px] bg-red-600 text-[9px] leading-none font-semibold text-white'
-    >
-      异
-    </span>
-  )
-}
-
-function renderQuotaDeductionAmount(
-  quota: number,
-  options: { bonus?: boolean; probePenalty?: boolean } = {}
-) {
-  const quotaDisplay = splitQuotaDisplay(formatLogQuota(quota))
-
-  return (
-    <span className='inline-flex items-center gap-1.5'>
-      <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 [font-family:var(--font-body)] text-sm leading-none font-semibold tabular-nums'>
-        {quotaDisplay.prefix && (
-          <span className='mr-1'>{quotaDisplay.prefix}</span>
-        )}
-        <span>{quotaDisplay.amount}</span>
-      </span>
-      {options.bonus && (
-        <img
-          src='/checkin-bonus-icon.svg'
-          alt='签到赠金抵扣'
-          title='签到赠金抵扣'
-          className='size-5 shrink-0'
-        />
-      )}
-      {options.probePenalty && renderProbePenaltyIcon()}
-    </span>
-  )
 }
 
 function buildDetailSegments(
@@ -753,46 +707,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         const quota = row.getValue('quota') as number
         const other = parseLogOther(log.other)
-        const isSubscription = other?.billing_source === 'subscription'
-        const bonusDeducted = other?.checkin_bonus_deducted ?? 0
-        const probePenalty = isProbePenaltyLog(other)
-
-        if (bonusDeducted > 0) {
-          return renderQuotaDeductionAmount(other?.consume_total ?? quota, {
-            bonus: true,
-            probePenalty,
-          })
-        }
-
-        if (isSubscription) {
-          return (
-            <span className='inline-flex items-center gap-1.5'>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <StatusBadge
-                        label={t('Subscription')}
-                        variant='success'
-                        size='sm'
-                        copyable={false}
-                        className='cursor-help'
-                      />
-                    }
-                  />
-                  <TooltipContent>
-                    <span>
-                      {t('Deducted by subscription')}: {formatLogQuota(quota)}
-                    </span>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              {probePenalty && renderProbePenaltyIcon()}
-            </span>
-          )
-        }
-
-        return renderQuotaDeductionAmount(quota, { probePenalty })
+        return <LogCostDisplay quota={quota} other={other} />
       },
     },
 
