@@ -39,11 +39,20 @@ type GeneralErrorResponse struct {
 }
 
 func (e GeneralErrorResponse) TryToOpenAIError() *types.OpenAIError {
-	var openAIError types.OpenAIError
+	var structuredError struct {
+		types.OpenAIError
+		Status json.RawMessage `json:"status"`
+	}
 	if len(e.Error) > 0 {
-		err := common.Unmarshal(e.Error, &openAIError)
-		if err == nil && openAIError.Message != "" {
-			return &openAIError
+		err := common.Unmarshal(e.Error, &structuredError)
+		if err == nil && structuredError.Message != "" {
+			if common.GetJsonType(structuredError.Status) == "string" {
+				var upstreamStatus string
+				if err := common.Unmarshal(structuredError.Status, &upstreamStatus); err == nil {
+					structuredError.UpstreamStatus = upstreamStatus
+				}
+			}
+			return &structuredError.OpenAIError
 		}
 	}
 	return nil

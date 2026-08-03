@@ -2,6 +2,7 @@ package claudemessages
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -9,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relaymeta "github.com/QuantumNous/new-api/service/relayconvert/internal/meta"
+	"github.com/QuantumNous/new-api/types"
 )
 
 const (
@@ -144,7 +146,12 @@ func ClaudeMessagesRequestToOpenAIChat(claudeRequest dto.ClaudeRequest, info *re
 		} else {
 			content, err := claudeMessage.ParseContent()
 			if err != nil {
-				return nil, err
+				return nil, types.NewErrorWithStatusCode(
+					fmt.Errorf("invalid Claude message content: %w", err),
+					types.ErrorCodeInvalidRequest,
+					http.StatusBadRequest,
+					types.ErrOptionWithSkipRetry(),
+				)
 			}
 			var toolCalls []dto.ToolCallRequest
 			mediaMessages := make([]dto.MediaContent, 0, len(content))

@@ -11,11 +11,12 @@ import (
 )
 
 type OpenAIError struct {
-	Message  string          `json:"message"`
-	Type     string          `json:"type"`
-	Param    string          `json:"param"`
-	Code     any             `json:"code"`
-	Metadata json.RawMessage `json:"metadata,omitempty"`
+	Message        string          `json:"message"`
+	Type           string          `json:"type"`
+	Param          string          `json:"param"`
+	Code           any             `json:"code"`
+	Metadata       json.RawMessage `json:"metadata,omitempty"`
+	UpstreamStatus string          `json:"-"`
 }
 
 type ClaudeError struct {
@@ -101,6 +102,8 @@ type NewAPIError struct {
 	errorCode      ErrorCode
 	StatusCode     int
 	Metadata       json.RawMessage
+
+	originalStatusCode int
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.
@@ -123,6 +126,30 @@ func (e *NewAPIError) GetErrorType() ErrorType {
 		return ""
 	}
 	return e.errorType
+}
+
+// GetOriginalStatusCode returns the status before any client-facing channel
+// mapping. Availability attribution must use this value, not the mapped one.
+func (e *NewAPIError) GetOriginalStatusCode() int {
+	if e == nil {
+		return 0
+	}
+	if e.originalStatusCode != 0 {
+		return e.originalStatusCode
+	}
+	return e.StatusCode
+}
+
+// SetMappedStatusCode changes only the client-facing status while preserving
+// the upstream/local status used for internal attribution.
+func (e *NewAPIError) SetMappedStatusCode(statusCode int) {
+	if e == nil {
+		return
+	}
+	if e.originalStatusCode == 0 {
+		e.originalStatusCode = e.StatusCode
+	}
+	e.StatusCode = statusCode
 }
 
 func (e *NewAPIError) Error() string {
@@ -290,7 +317,9 @@ func NewOpenAIError(err error, errorCode ErrorCode, statusCode int, ops ...NewAP
 		Type:    string(errorCode),
 		Code:    errorCode,
 	}
-	return WithOpenAIError(openaiError, statusCode, ops...)
+	newErr = WithOpenAIError(openaiError, statusCode, ops...)
+	newErr.Err = err
+	return newErr
 }
 
 func InitOpenAIError(errorCode ErrorCode, statusCode int, ops ...NewAPIErrorOptions) *NewAPIError {

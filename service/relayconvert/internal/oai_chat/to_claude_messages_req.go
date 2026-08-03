@@ -3,6 +3,7 @@ package oaichat
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -11,6 +12,7 @@ import (
 	sharedclaude "github.com/QuantumNous/new-api/service/relayconvert/internal/shared/claude"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/reasoning"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -197,7 +199,12 @@ func OpenAIChatRequestToClaudeMessages(c *gin.Context, textRequest dto.GeneralOp
 	if textRequest.Reasoning != nil {
 		var reasoningConfig openRouterRequestReasoning
 		if err := common.Unmarshal(textRequest.Reasoning, &reasoningConfig); err != nil {
-			return nil, err
+			return nil, types.NewErrorWithStatusCode(
+				fmt.Errorf("invalid reasoning configuration: %w", err),
+				types.ErrorCodeInvalidRequest,
+				http.StatusBadRequest,
+				types.ErrOptionWithSkipRetry(),
+			)
 		}
 
 		budgetTokens := reasoningConfig.MaxTokens

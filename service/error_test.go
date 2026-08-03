@@ -60,6 +60,7 @@ func TestResetStatusCode(t *testing.T) {
 			}
 			ResetStatusCode(newAPIError, tc.statusCodeConfig)
 			require.Equal(t, tc.expectedCode, newAPIError.StatusCode)
+			require.Equal(t, tc.statusCode, newAPIError.GetOriginalStatusCode())
 		})
 	}
 }
@@ -110,7 +111,7 @@ func TestRelayErrorHandlerKeepsStructuredErrorMessage(t *testing.T) {
 
 func TestRelayErrorHandlerKeepsOpenAIErrorMessage(t *testing.T) {
 	message := strings.Repeat("d", common.LocalLogContentLimit+256)
-	body := `{"error":{"message":"` + message + `","type":"server_error","code":"server_error"}}`
+	body := `{"error":{"message":"` + message + `","type":"server_error","code":"server_error","status":"RESOURCE_EXHAUSTED"}}`
 	resp := &http.Response{
 		StatusCode: http.StatusInternalServerError,
 		Body:       io.NopCloser(strings.NewReader(body)),
@@ -120,6 +121,27 @@ func TestRelayErrorHandlerKeepsOpenAIErrorMessage(t *testing.T) {
 
 	require.NotNil(t, newAPIError)
 	require.Equal(t, message, newAPIError.Error())
+	relayError, ok := newAPIError.RelayError.(types.OpenAIError)
+	require.True(t, ok)
+	require.Equal(t, "RESOURCE_EXHAUSTED", relayError.UpstreamStatus)
+}
+
+func TestRelayErrorHandlerKeepsOpenAIErrorWithNumericStatus(t *testing.T) {
+	body := `{"error":{"message":"invalid request","type":"invalid_request_error","code":"invalid_request","status":400}}`
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, "invalid request", newAPIError.Error())
+	relayError, ok := newAPIError.RelayError.(types.OpenAIError)
+	require.True(t, ok)
+	require.Equal(t, "invalid_request_error", relayError.Type)
+	require.Equal(t, "invalid_request", relayError.Code)
+	require.Empty(t, relayError.UpstreamStatus)
 }
 
 func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {
