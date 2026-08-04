@@ -43,7 +43,12 @@ import { Label } from '@/components/ui/label'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
+import {
+  formatLogQuota,
+  formatRatioMultiplier,
+  formatTokens,
+  formatUseTime,
+} from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { getLogDetail } from '../../api'
@@ -146,11 +151,6 @@ function DetailSection(props: {
       </div>
     </div>
   )
-}
-
-function formatRatio(ratio: number | undefined): string {
-  if (ratio == null) return '-'
-  return ratio.toFixed(4)
 }
 
 function getUsageBillingPathLabel(
@@ -274,19 +274,19 @@ function BillingBreakdown(props: {
       other.base_group_ratio ?? other.user_group_ratio ?? other.group_ratio
     rows.push({
       label: '分组倍率',
-      value: `${formatRatio(baseGroupRatio)}x`,
+      value: `${formatRatioMultiplier(baseGroupRatio)}x`,
     })
     rows.push({
       label: other.user_level_name
         ? `等级倍率（${other.user_level_name}）`
         : '等级倍率',
       value: other.user_level_exempt
-        ? `${formatRatio(other.user_level_ratio)}x（本项不适用）`
-        : `${formatRatio(other.user_level_ratio)}x`,
+        ? `${formatRatioMultiplier(other.user_level_ratio)}x（本项不适用）`
+        : `${formatRatioMultiplier(other.user_level_ratio)}x`,
     })
     rows.push({
       label: '最终倍率',
-      value: `${formatRatio(other.group_ratio)}x`,
+      value: `${formatRatioMultiplier(other.group_ratio)}x`,
     })
   } else {
     const userGR = other.user_group_ratio
@@ -295,7 +295,7 @@ function BillingBreakdown(props: {
     if (effectiveGR != null && Number.isFinite(effectiveGR)) {
       rows.push({
         label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
-        value: `${formatRatio(effectiveGR)}x`,
+        value: `${formatRatioMultiplier(effectiveGR)}x`,
       })
     }
   }
@@ -942,7 +942,7 @@ function DetailsDialogContent(props: DetailsDialogContentProps) {
               <>
                 <DetailRow
                   label='分组倍率'
-                  value={`${formatRatio(other.group_ratio)}x`}
+                  value={`${formatRatioMultiplier(other.group_ratio)}x`}
                   mono
                 />
                 <DetailRow
@@ -951,7 +951,7 @@ function DetailsDialogContent(props: DetailsDialogContentProps) {
                       ? `等级优惠（${other.user_level_name}）`
                       : '等级优惠'
                   }
-                  value={`${formatRatio(other.user_level_ratio)}x（违规附加费不适用）`}
+                  value={`${formatRatioMultiplier(other.user_level_ratio)}x（违规附加费不适用）`}
                 />
               </>
             )}

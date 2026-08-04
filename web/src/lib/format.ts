@@ -57,6 +57,17 @@ export function formatPercent(value: number | null | undefined): string {
   }).format((value as number) / 100)
 }
 
+export function formatRatioMultiplier(
+  value: number | null | undefined
+): string {
+  if (value == null || !Number.isFinite(value)) return '-'
+  const rounded = value.toFixed(4)
+  if (value !== 0 && Number(rounded) === 0) {
+    return value > 0 ? '<0.0001' : '>-0.0001'
+  }
+  return rounded.replace(/\.?0+$/, '')
+}
+
 export function formatCurrencyUSD(value: number | null | undefined): string {
   return formatCurrencyFromUSD(value == null ? null : (value as number))
 }

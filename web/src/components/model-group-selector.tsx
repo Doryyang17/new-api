@@ -60,6 +60,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { formatRatioMultiplier } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import {
@@ -444,7 +445,9 @@ export const GroupSelector: React.FC<GroupSelectorProps> = React.memo(
                         {group.ratio && (
                           <>
                             {' · '}
-                            {t('Ratio: {{value}}', { value: group.ratio })}
+                            {t('Ratio: {{value}}', {
+                              value: formatRatioMultiplier(group.ratio),
+                            })}
                           </>
                         )}
                       </div>
@@ -505,7 +508,7 @@ export const GroupSelector: React.FC<GroupSelectorProps> = React.memo(
                             <>
                               {' · '}
                               {t('Ratio: {{value}}', {
-                                value: group.ratio,
+                                value: formatRatioMultiplier(group.ratio),
                               })}
                             </>
                           )}

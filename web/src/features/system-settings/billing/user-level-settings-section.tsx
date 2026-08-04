@@ -106,7 +106,7 @@ export function UserLevelSettingsSection() {
     resolver: zodResolver(
       userLevelSettingsSchema
     ) as Resolver<UserLevelSettingsValues>,
-    defaultValues: cloneConfig(DEFAULT_USER_LEVEL_CONFIG),
+    defaultValues: cloneConfig(query.data?.config ?? DEFAULT_USER_LEVEL_CONFIG),
   })
   const levelFields = useFieldArray({
     control: form.control,

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
 
+import { formatRatioMultiplier } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { StatusBadge, type StatusBadgeProps } from './status-badge'
@@ -102,7 +103,7 @@ export function GroupBadge(props: GroupBadgeProps) {
           getGroupRatioClassName(ratio)
         )}
       >
-        <span>{ratio}x</span>
+        <span>{formatRatioMultiplier(ratio)}x</span>
       </span>
     </span>
   )

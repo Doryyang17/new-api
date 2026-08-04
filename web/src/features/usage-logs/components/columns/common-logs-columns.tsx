@@ -37,7 +37,11 @@ import {
 } from '@/components/ui/tooltip'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
+import {
+  formatLogQuota,
+  formatRatioMultiplier,
+  formatTimestampToDate,
+} from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
@@ -67,13 +71,6 @@ interface DetailSegment {
   text: string
   muted?: boolean
   danger?: boolean
-}
-
-function formatRatioCompact(ratio: number | undefined): string {
-  if (ratio == null || !Number.isFinite(ratio)) return '-'
-  return ratio % 1 === 0
-    ? String(ratio)
-    : ratio.toFixed(4).replace(/\.?0+$/, '')
 }
 
 function getGroupRatio(other: LogOtherData | null): number | null {
@@ -282,7 +279,7 @@ function buildTypeDetailSegments(
           ? `（${other.user_level_name}）`
           : ''
         segments.push({
-          text: `分组 ${formatRatioCompact(baseRatio)}x · 等级${levelName} ${formatRatioCompact(other.user_level_ratio)}x · 最终 ${formatRatioCompact(other.group_ratio)}x`,
+          text: `分组 ${formatRatioMultiplier(baseRatio)}x · 等级${levelName} ${formatRatioMultiplier(other.user_level_ratio)}x · 最终 ${formatRatioMultiplier(other.group_ratio)}x`,
         })
       } else {
         const userGroupRatio = other.user_group_ratio
@@ -298,7 +295,7 @@ function buildTypeDetailSegments(
 
         if (effectiveRatio != null && Number.isFinite(effectiveRatio)) {
           segments.push({
-            text: `${ratioLabel} ${formatRatioCompact(effectiveRatio)}x`,
+            text: `${ratioLabel} ${formatRatioMultiplier(effectiveRatio)}x`,
           })
         }
       }
@@ -619,7 +616,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               {group && groupRatio != null ? ' ' : null}
               {groupRatio != null ? (
                 <span className='text-muted-foreground/60 relative top-px align-baseline tabular-nums'>
-                  {formatRatioCompact(groupRatio)}x
+                  {formatRatioMultiplier(groupRatio)}x
                 </span>
               ) : null}
             </span>

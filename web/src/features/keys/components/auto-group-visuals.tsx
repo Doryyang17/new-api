@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
 import { Badge } from '@/components/ui/badge'
+import { formatRatioMultiplier } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 export type GroupRatio = number | string | null | undefined
@@ -99,7 +100,7 @@ export function GroupRatioBadge(props: GroupRatioBadgeProps) {
 
   const label =
     typeof props.ratio === 'number'
-      ? `${props.ratio}x ${t('Ratio')}`
+      ? `${formatRatioMultiplier(props.ratio)}x ${t('Ratio')}`
       : `${t('Auto')} ${t('Ratio')}`
   const badge = (
     <Badge

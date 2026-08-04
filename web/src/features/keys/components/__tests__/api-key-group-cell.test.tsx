@@ -223,11 +223,16 @@ describe('API key group table cell', () => {
 
     await act(async () =>
       root.render(
-        <CellHarness group='vip' ratio={3} shouldReduceMotion={false} />
+        <CellHarness
+          group='vip'
+          ratio={1.1700000000000002}
+          shouldReduceMotion={false}
+        />
       )
     )
 
-    assert.equal(container.textContent?.includes('3x'), true)
+    assert.equal(container.textContent?.includes('1.17x'), true)
+    assert.equal(container.textContent?.includes('1.1700000000000002x'), false)
     assert.equal(container.querySelector('[data-auto-group-frame]'), null)
 
     await act(async () => root.unmount())

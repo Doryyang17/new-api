@@ -74,6 +74,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { formatRatioMultiplier } from '@/lib/format'
 
 import { safeJsonParse } from '../utils/json-parser'
 
@@ -903,14 +904,21 @@ function GroupOverrideRules({
                                   const baseRatio = baseRatioByName.get(
                                     override.targetGroup
                                   )
+                                  const overrideRatioLabel =
+                                    formatRatioMultiplier(override.ratio)
+                                  const baseRatioLabel =
+                                    baseRatio === undefined
+                                      ? undefined
+                                      : formatRatioMultiplier(baseRatio)
                                   return (
                                     <span className='inline-flex items-center gap-1.5'>
-                                      {override.ratio}
-                                      {baseRatio !== undefined &&
-                                        baseRatio !== override.ratio && (
+                                      {overrideRatioLabel}
+                                      {baseRatioLabel !== undefined &&
+                                        baseRatioLabel !==
+                                          overrideRatioLabel && (
                                           <span className='text-muted-foreground text-xs'>
                                             {t('(instead of {{ratio}})', {
-                                              ratio: baseRatio,
+                                              ratio: baseRatioLabel,
                                             })}
                                           </span>
                                         )}
@@ -1109,7 +1117,9 @@ function GroupOverrideDialog({
           />
           <p className='text-muted-foreground text-xs'>
             {baseRatio !== undefined
-              ? t('(instead of {{ratio}})', { ratio: baseRatio })
+              ? t('(instead of {{ratio}})', {
+                  ratio: formatRatioMultiplier(baseRatio),
+                })
               : t(
                   'Multiplier applied when {{userGroup}} uses {{targetGroup}}',
                   {
@@ -1300,7 +1310,9 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
                       <span>
                         {t('Users in {{group}}', { group: item.userGroup })}
                       </span>
-                      <span className='font-medium'>{item.ratio}</span>
+                      <span className='font-medium'>
+                        {formatRatioMultiplier(item.ratio)}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -1325,7 +1337,9 @@ function GroupDetailSheet(props: GroupDetailSheetProps) {
                           group: item.targetGroup,
                         })}
                       </span>
-                      <span className='font-medium'>{item.ratio}</span>
+                      <span className='font-medium'>
+                        {formatRatioMultiplier(item.ratio)}
+                      </span>
                     </li>
                   ))}
                 </ul>
