@@ -8,16 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMarkBillingPendingEnablesLevelProgressTracking(t *testing.T) {
-	task := &Midjourney{}
-	task.MarkBillingPending(123)
-
-	assert.Equal(t, MidjourneyBillingStatusPending, task.BillingStatus)
-	assert.EqualValues(t, 123, task.BillingPendingAt)
-	assert.True(t, task.LevelProgressEligible)
-	assert.True(t, task.LevelProgressPending)
-}
-
 func TestImmediateChargeAtomicallyPersistsMidjourneyBilling(t *testing.T) {
 	truncateTables(t)
 	user := &User{Id: 701, Username: "mj-charge", AffCode: "mj-charge", Quota: 100}

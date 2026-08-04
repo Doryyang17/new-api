@@ -70,15 +70,6 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	return tokenErr
 }
 
-// FundingSettled reports whether the wallet/subscription side of settlement
-// has committed. Token-quota adjustment can fail after this point, but callers
-// must still account for the usage because the charge can no longer be refunded.
-func (s *BillingSession) FundingSettled() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.fundingSettled
-}
-
 // Refund 同步退还所有预扣费。只有资金来源和令牌额度都恢复成功后，
 // 会话才会标记为已退款，从而保证后续违规费基于最新余额重新扣减。
 func (s *BillingSession) Refund(c *gin.Context) error {

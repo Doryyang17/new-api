@@ -21,7 +21,6 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
-	service.RegisterSystemTaskHandler(userLevelProgressHandler{})
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and
@@ -149,56 +148,6 @@ func (asyncTaskPollHandler) NewPayload() any { return nil }
 
 func (asyncTaskPollHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
 	summary := service.RunTaskPollingOnce(ctx, service.NewSystemTaskProgressReporter(task, runnerID))
-	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
-}
-
-// userLevelProgressHandler reconciles terminal async-task usage independently
-// from upstream polling. Webhooks and other direct terminal writes therefore
-// remain recoverable even when UPDATE_TASK is disabled.
-type userLevelProgressHandler struct{}
-
-type userLevelProgressSummary struct {
-	AsyncTasksReconciled int `json:"async_tasks_reconciled"`
-	MidjourneyReconciled int `json:"midjourney_reconciled"`
-}
-
-func (userLevelProgressHandler) Type() string { return model.SystemTaskTypeLevelProgress }
-
-func (userLevelProgressHandler) Enabled() bool {
-	return model.HasPendingTaskLevelProgress() || model.HasPendingMidjourneyLevelProgress()
-}
-
-func (userLevelProgressHandler) Interval() time.Duration { return 15 * time.Second }
-
-func (userLevelProgressHandler) NewPayload() any { return nil }
-
-func (userLevelProgressHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	summary := userLevelProgressSummary{}
-	if err := ctx.Err(); err != nil {
-		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, err)
-		return
-	}
-
-	reconciled, err := model.ReconcilePendingTaskLevelProgress(constant.TaskQueryLimit)
-	if err != nil {
-		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, err)
-		return
-	}
-	summary.AsyncTasksReconciled = reconciled
-
-	if err := ctx.Err(); err != nil {
-		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, err)
-		return
-	}
-	reconciled, err = model.ReconcilePendingMidjourneyLevelProgress(constant.TaskQueryLimit)
-	if err != nil {
-		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, err)
-		return
-	}
-	summary.MidjourneyReconciled = reconciled
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 

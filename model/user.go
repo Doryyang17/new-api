@@ -97,7 +97,6 @@ type User struct {
 	RequestCount     int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
 	Group            string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
 	LevelKey         string                     `json:"level_key" gorm:"type:varchar(32);column:level_key;index"`
-	LevelUsageQuota  int64                      `json:"level_consumed_quota" gorm:"type:bigint;default:0;column:level_consumed_quota"`
 	LevelName        string                     `json:"level_name,omitempty" gorm:"-:all"`
 	LevelRatio       float64                    `json:"level_ratio,omitempty" gorm:"-:all"`
 	LevelBadgeColor  string                     `json:"level_badge_color,omitempty" gorm:"-:all"`
@@ -756,7 +755,7 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 		}
 	}
 	if err = tx.Model(&current).
-		Omit("quota", "used_quota", "level_consumed_quota", "level_key", "request_count", "auth_version").
+		Omit("quota", "used_quota", "level_key", "request_count", "auth_version").
 		Updates(newUser).Error; err != nil {
 		return err
 	}
@@ -1318,66 +1317,35 @@ func UpdateUserLastLoginAt(id int) {
 
 func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
 	if common.BatchUpdateEnabled {
-		addUserAccountingRecord(id, quota, 0, 1)
+		addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
+		addNewRecord(BatchUpdateTypeRequestCount, id, 1)
 		return
 	}
-	if err := updateUserAccountingCounters(id, 0, quota, 0, 1); err != nil {
+	updateUserUsedQuotaAndRequestCount(id, quota, 1)
+}
+
+func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
+	err := DB.Model(&User{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"used_quota":    gorm.Expr("used_quota + ?", quota),
+		"request_count": gorm.Expr("request_count + ?", count),
+	}).Error
+	if err != nil {
 		common.SysLog("failed to update user used quota and request count: " + err.Error())
 	}
 }
 
-// RecordUserUsage records one synchronous request. Used quota and request count
-// always reflect billable upstream usage; level progress is included only after
-// the user's funding source has committed successfully.
-func RecordUserUsage(id int, quota int, includeLevelProgress bool) error {
-	if id <= 0 {
-		return fmt.Errorf("invalid user id: %d", id)
+func updateUserQuotaUsedQuotaAndRequestCount(id int, quota int, usedQuota int, requestCount int) {
+	if quota == 0 && usedQuota == 0 && requestCount == 0 {
+		return
 	}
-	if quota < 0 {
-		return fmt.Errorf("usage quota cannot be negative: %d", quota)
+	err := DB.Model(&User{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"quota":         gorm.Expr("quota + ?", quota),
+		"used_quota":    gorm.Expr("used_quota + ?", usedQuota),
+		"request_count": gorm.Expr("request_count + ?", requestCount),
+	}).Error
+	if err != nil {
+		common.SysLog("failed to batch update user quota, used quota and request count: " + err.Error())
 	}
-	levelConsumedQuota := 0
-	if includeLevelProgress {
-		levelConsumedQuota = quota
-	}
-	if common.BatchUpdateEnabled {
-		addUserAccountingRecord(id, quota, levelConsumedQuota, 1)
-		return nil
-	}
-	return updateUserAccountingCounters(id, 0, quota, levelConsumedQuota, 1)
-}
-
-// RecordUserSettledUsage preserves the settled-only helper used by callers and
-// tests that need all three accounting counters to advance together.
-func RecordUserSettledUsage(id int, quota int) error {
-	return RecordUserUsage(id, quota, true)
-}
-
-func updateUserAccountingCounters(id int, quota int, usedQuota int, levelConsumedQuota int, requestCount int) error {
-	updates := make(map[string]interface{}, 4)
-	if quota != 0 {
-		updates["quota"] = gorm.Expr("quota + ?", quota)
-	}
-	if usedQuota != 0 {
-		updates["used_quota"] = gorm.Expr("used_quota + ?", usedQuota)
-	}
-	if levelConsumedQuota != 0 {
-		updates["level_consumed_quota"] = levelConsumedQuotaUpdateExpr(int64(levelConsumedQuota))
-	}
-	if requestCount != 0 {
-		updates["request_count"] = gorm.Expr("request_count + ?", requestCount)
-	}
-	if len(updates) == 0 {
-		return nil
-	}
-	result := DB.Model(&User{}).Where("id = ?", id).Updates(updates)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected != 1 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
 }
 
 func updateUserUsedQuota(id int, quota int) {

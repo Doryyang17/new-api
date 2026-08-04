@@ -244,7 +244,7 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 
 // SettleBilling 执行计费结算。如果 RelayInfo 上有 BillingSession 则通过 session 结算，
 // 否则回退到旧的 PostConsumeQuota 路径（兼容按次计费等场景）。
-func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) (bool, error) {
+func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) error {
 	if relayInfo.Billing != nil {
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
 		delta := actualQuota - preConsumed
@@ -267,13 +267,8 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 			))
 		}
 
-		settleErr := relayInfo.Billing.Settle(actualQuota)
-		fundingCommitted := settleErr == nil
-		if state, ok := relayInfo.Billing.(interface{ FundingSettled() bool }); ok {
-			fundingCommitted = state.FundingSettled()
-		}
-		if !fundingCommitted {
-			return false, settleErr
+		if err := relayInfo.Billing.Settle(actualQuota); err != nil {
+			return err
 		}
 
 		// 发送额度通知（订阅计费使用订阅剩余额度）
@@ -287,29 +282,13 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 				checkAndSendQuotaNotify(relayInfo, relayInfo.OriginalFundingConsumed, 0)
 			}
 		}
-		return true, settleErr
+		return nil
 	}
 
 	// 回退：无 BillingSession 时使用旧路径
 	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
 	if quotaDelta != 0 {
-		if err := PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true); err != nil {
-			return false, err
-		}
+		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
 	}
-	return true, nil
-}
-
-func settleBillingAndRecordUsage(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int, hasBillableUsage bool) {
-	settled, settleErr := SettleBilling(ctx, relayInfo, actualQuota)
-	if settleErr != nil {
-		logger.LogError(ctx, "error settling billing: "+settleErr.Error())
-	}
-	if !hasBillableUsage {
-		return
-	}
-	if err := model.RecordUserUsage(relayInfo.UserId, actualQuota, settled); err != nil {
-		logger.LogError(ctx, "failed to record user usage: "+err.Error())
-	}
-	model.UpdateChannelUsedQuota(relayInfo.ChannelId, actualQuota)
+	return nil
 }

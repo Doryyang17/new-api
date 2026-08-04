@@ -31,16 +31,15 @@ func TestUserUpdateDoesNotOverwriteAccountingFields(t *testing.T) {
 	setupUserUpdateTestState(t)
 
 	user := User{
-		Id:              1,
-		Username:        "quota-race-user",
-		Password:        "password",
-		DisplayName:     "before",
-		Status:          common.UserStatusEnabled,
-		Quota:           1000,
-		UsedQuota:       20,
-		LevelKey:        "silver",
-		LevelUsageQuota: 100,
-		RequestCount:    3,
+		Id:           1,
+		Username:     "quota-race-user",
+		Password:     "password",
+		DisplayName:  "before",
+		Status:       common.UserStatusEnabled,
+		Quota:        1000,
+		UsedQuota:    20,
+		LevelKey:     "silver",
+		RequestCount: 3,
 	}
 	require.NoError(t, DB.Create(&user).Error)
 
@@ -48,11 +47,10 @@ func TestUserUpdateDoesNotOverwriteAccountingFields(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
-		"quota":                gorm.Expr("quota - ?", 400),
-		"used_quota":           gorm.Expr("used_quota + ?", 400),
-		"level_key":            "gold",
-		"level_consumed_quota": gorm.Expr("level_consumed_quota + ?", 400),
-		"request_count":        gorm.Expr("request_count + ?", 1),
+		"quota":         gorm.Expr("quota - ?", 400),
+		"used_quota":    gorm.Expr("used_quota + ?", 400),
+		"level_key":     "gold",
+		"request_count": gorm.Expr("request_count + ?", 1),
 	}).Error)
 
 	staleUser.DisplayName = "after"
@@ -64,7 +62,6 @@ func TestUserUpdateDoesNotOverwriteAccountingFields(t *testing.T) {
 	assert.Equal(t, 600, got.Quota)
 	assert.Equal(t, 420, got.UsedQuota)
 	assert.Equal(t, "gold", got.LevelKey)
-	assert.EqualValues(t, 500, got.LevelUsageQuota)
 	assert.Equal(t, 4, got.RequestCount)
 }
 

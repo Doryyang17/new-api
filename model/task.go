@@ -58,17 +58,12 @@ type Task struct {
 	Action     string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
 	Status     TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
 	FailReason string                `json:"fail_reason"`
-	// LevelProgressPending limits recovery queries to active/unreconciled tasks;
-	// completed history leaves the index as soon as reconciliation succeeds.
-	LevelProgressEligible bool       `json:"-" gorm:"column:level_progress_eligible;index:idx_tasks_level_progress_pending,priority:2"`
-	LevelProgressPending  bool       `json:"-" gorm:"column:level_progress_pending;index:idx_tasks_level_progress_pending,priority:1"`
-	LevelProgressQuota    int64      `json:"-" gorm:"type:bigint;column:level_progress_quota"`
-	SubmitTime            int64      `json:"submit_time" gorm:"index"`
-	StartTime             int64      `json:"start_time" gorm:"index"`
-	FinishTime            int64      `json:"finish_time" gorm:"index"`
-	Progress              string     `json:"progress" gorm:"type:varchar(20);index"`
-	Properties            Properties `json:"properties" gorm:"type:json"`
-	Username              string     `json:"username,omitempty" gorm:"-"`
+	SubmitTime int64                 `json:"submit_time" gorm:"index"`
+	StartTime  int64                 `json:"start_time" gorm:"index"`
+	FinishTime int64                 `json:"finish_time" gorm:"index"`
+	Progress   string                `json:"progress" gorm:"type:varchar(20);index"`
+	Properties Properties            `json:"properties" gorm:"type:json"`
+	Username   string                `json:"username,omitempty" gorm:"-"`
 	// 禁止返回给用户，内部可能包含key等隐私信息
 	PrivateData TaskPrivateData `json:"-" gorm:"column:private_data;type:json"`
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
@@ -186,7 +181,7 @@ type SyncTaskQueryParams struct {
 	UserIDs        []int
 }
 
-func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo, levelProgressEligible bool) *Task {
+func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) *Task {
 	properties := Properties{}
 	privateData := TaskPrivateData{}
 	if relayInfo != nil && relayInfo.ChannelMeta != nil {
@@ -211,18 +206,16 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo, 
 	}
 
 	t := &Task{
-		TaskID:                taskID,
-		UserId:                relayInfo.UserId,
-		Group:                 relayInfo.UsingGroup,
-		SubmitTime:            time.Now().Unix(),
-		Status:                TaskStatusNotStart,
-		LevelProgressEligible: levelProgressEligible,
-		LevelProgressPending:  levelProgressEligible,
-		Progress:              "0%",
-		ChannelId:             relayInfo.ChannelId,
-		Platform:              platform,
-		Properties:            properties,
-		PrivateData:           privateData,
+		TaskID:      taskID,
+		UserId:      relayInfo.UserId,
+		Group:       relayInfo.UsingGroup,
+		SubmitTime:  time.Now().Unix(),
+		Status:      TaskStatusNotStart,
+		Progress:    "0%",
+		ChannelId:   relayInfo.ChannelId,
+		Platform:    platform,
+		Properties:  properties,
+		PrivateData: privateData,
 	}
 	return t
 }
@@ -416,33 +409,14 @@ func (t *Task) Snapshot() taskSnapshot {
 }
 
 func (Task *Task) Update() error {
-	needsProgressReconciliation := Task.needsLevelProgressReconciliation()
-	if needsProgressReconciliation {
-		Task.LevelProgressPending = true
-	}
-	// Reconciliation owns the durable eligibility/quota snapshot; a stale task
-	// object may only re-arm the pending marker, never overwrite that snapshot.
-	update := DB.Model(Task).Select("*").Omit("level_progress_eligible", "level_progress_quota")
-	if !needsProgressReconciliation {
-		update = update.Omit("level_progress_pending")
-	}
-	return update.Updates(Task).Error
+	return DB.Save(Task).Error
 }
 
 func (t *Task) UpdateQuota() error {
-	updates := map[string]interface{}{
+	return DB.Model(t).Updates(map[string]interface{}{
 		"quota":        t.Quota,
 		"private_data": t.PrivateData,
-	}
-	if t.needsLevelProgressReconciliation() {
-		t.LevelProgressPending = true
-		updates["level_progress_pending"] = true
-	}
-	return DB.Model(t).Updates(updates).Error
-}
-
-func (t *Task) needsLevelProgressReconciliation() bool {
-	return t.LevelProgressEligible && (t.Status == TaskStatusSuccess || t.Status == TaskStatusFailure)
+	}).Error
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
@@ -455,16 +429,7 @@ func (t *Task) needsLevelProgressReconciliation() bool {
 // falls back to INSERT ON CONFLICT when the WHERE-guarded UPDATE matches
 // zero rows, which silently bypasses the CAS guard.
 func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
-	needsProgressReconciliation := t.needsLevelProgressReconciliation()
-	if needsProgressReconciliation {
-		t.LevelProgressPending = true
-	}
-	// Keep reconciliation-owned columns out of full-row CAS updates.
-	update := DB.Model(t).Where("status = ?", fromStatus).Select("*").Omit("level_progress_eligible", "level_progress_quota")
-	if !needsProgressReconciliation {
-		update = update.Omit("level_progress_pending")
-	}
-	result := update.Updates(t)
+	result := DB.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -480,21 +445,9 @@ func TaskBulkUpdateByID(ids []int64, params map[string]any) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	if _, changesStatus := params["status"]; changesStatus {
-		params = cloneUpdateParams(params)
-		params["level_progress_pending"] = true
-	}
 	return DB.Model(&Task{}).
 		Where("id in (?)", ids).
 		Updates(params).Error
-}
-
-func cloneUpdateParams(params map[string]any) map[string]any {
-	cloned := make(map[string]any, len(params)+1)
-	for key, value := range params {
-		cloned[key] = value
-	}
-	return cloned
 }
 
 type TaskQuotaUsage struct {

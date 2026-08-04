@@ -274,7 +274,6 @@ func TestRecalculateTaskQuotaByTokensUsesFrozenUserLevelSnapshot(t *testing.T) {
 		GroupRatio:      1.2,
 		OriginModelName: "test-model",
 	}
-
 	RecalculateTaskQuotaByTokens(ctx, task, 1_000)
 
 	const expectedQuota = 2_400
@@ -525,7 +524,6 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	seedToken(t, tokenID, userID, "sk-recalc-pos", tokenRemain)
 	seedChannel(t, channelID)
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-
 	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
 
 	// User quota should decrease by the delta (1000 additional charge)
@@ -556,7 +554,6 @@ func TestRecalculate_NegativeDelta(t *testing.T) {
 	seedToken(t, tokenID, userID, "sk-recalc-neg", tokenRemain)
 	seedChannel(t, channelID)
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-
 	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
 
 	// User quota should increase by abs(delta) = 2000 (refund overpayment)
@@ -628,7 +625,6 @@ func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
 	seedSubscription(t, subID, userID, subTotal, subUsed)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
-
 	RecalculateTaskQuota(ctx, task, actualQuota, "subscription over-charge")
 
 	// Subscription used should decrease by delta (refund 3000)
@@ -922,7 +918,6 @@ func TestSettle_NonPerCallBilling_AppliesAdaptorAdjustment(t *testing.T) {
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 	// PerCallBilling defaults to false
-
 	adaptor := &mockAdaptor{adjustReturn: adaptorQuota}
 	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess}
 

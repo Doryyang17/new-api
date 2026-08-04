@@ -294,10 +294,6 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	if !tokenHandled {
 		taskAdjustTokenQuota(ctx, task, -quota)
 	}
-	if _, err := model.ReconcileTaskLevelConsumedQuota(task.ID); err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("回退异步任务等级进度失败 task %s: %s", task.TaskID, err.Error()))
-	}
-
 	// 3. 记录日志
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
@@ -380,6 +376,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	if err := task.UpdateQuota(); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算回写 quota 失败 task %s: %s", task.TaskID, err.Error()))
 	}
+
 	var logType int
 	var logQuota int
 	if quotaDelta > 0 {

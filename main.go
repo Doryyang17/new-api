@@ -154,8 +154,7 @@ func main() {
 	}
 
 	// Register periodic maintenance as scheduled system tasks (DB-lease dedup
-	// across masters + run history), then start the runner. Upstream task polling
-	// respects UpdateTask; user-level progress recovery remains independent.
+	// across masters + run history), then start the runner.
 	controller.RegisterScheduledSystemTasks()
 	service.StartSystemTaskRunner()
 

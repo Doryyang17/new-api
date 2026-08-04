@@ -19,8 +19,7 @@ const (
 	BaseLevelID   = "base"
 	SchemaVersion = 1
 	MaxLevelCount = 20
-	// MaxThresholdQuota keeps progress values exactly representable by the
-	// JavaScript admin/profile clients while the database stores them as BIGINT.
+	// Keep persisted configurations exactly representable by JavaScript clients.
 	MaxThresholdQuota int64 = 9_007_199_254_740_991
 	maxLevelNameLen         = 20
 	maxDescription          = 80
@@ -81,14 +80,22 @@ func (value *configValue) Store(next UserLevelConfig) {
 }
 
 func (value *configValue) Load() UserLevelConfig {
+	return cloneConfig(*value.loadSnapshot())
+}
+
+// loadSnapshot is for internal read-only hot paths. Store publishes an
+// immutable clone, so readers can avoid allocating another Levels slice.
+func (value *configValue) loadSnapshot() *UserLevelConfig {
 	if value == nil {
-		return DefaultConfig()
+		fallback := DefaultConfig()
+		return &fallback
 	}
 	current := value.snapshot.Load()
 	if current == nil {
-		return DefaultConfig()
+		fallback := DefaultConfig()
+		return &fallback
 	}
-	return cloneConfig(*current)
+	return current
 }
 
 func (value *configValue) MarshalJSON() ([]byte, error) {
@@ -136,7 +143,7 @@ func GetConfig() UserLevelConfig {
 }
 
 func IsEnabled() bool {
-	return GetConfig().Enabled
+	return currentSettings.Config.loadSnapshot().Enabled
 }
 
 func ParseConfigJSON(data []byte) (UserLevelConfig, error) {
@@ -271,10 +278,10 @@ func NormalizeAndValidate(value UserLevelConfig) (UserLevelConfig, error) {
 }
 
 func ResolveBillingLevel(levelID string) BillingLevel {
-	current := GetConfig()
-	level, ok := findLevel(current, levelID)
+	current := currentSettings.Config.loadSnapshot()
+	level, ok := findLevel(*current, levelID)
 	if !ok {
-		level, _ = findLevel(current, BaseLevelID)
+		level, _ = findLevel(*current, BaseLevelID)
 	}
 	ratio := 1.0
 	if current.Enabled {

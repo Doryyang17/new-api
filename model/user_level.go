@@ -41,16 +41,14 @@ type UserLevelMemberCount struct {
 	Count    int64  `json:"count"`
 }
 
-// GetUserLevelProgressFromDB reads the dedicated durable settled-usage total.
-// Balance sources such as recharge and check-in grants do not affect it, and
-// refundable asynchronous task charges are only added after terminal success.
+// GetUserLevelProgressFromDB uses new-api's native cumulative usage counter.
 func GetUserLevelProgressFromDB(userId int) (string, int64, error) {
 	var user User
-	err := DB.Select("level_key", "level_consumed_quota").Where("id = ?", userId).First(&user).Error
+	err := DB.Select("level_key", "used_quota").Where("id = ?", userId).First(&user).Error
 	if err != nil {
 		return "", 0, err
 	}
-	consumedQuota := user.LevelUsageQuota
+	consumedQuota := int64(user.UsedQuota)
 	if consumedQuota < 0 {
 		consumedQuota = 0
 	}
@@ -89,13 +87,13 @@ func ClaimHighestEligibleUserLevel(userId int) (*UserLevelClaimResult, error) {
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var user User
 		if err := lockForUpdate(tx).
-			Select("id", "level_key", "level_consumed_quota").
+			Select("id", "level_key", "used_quota").
 			Where("id = ?", userId).
 			First(&user).Error; err != nil {
 			return err
 		}
 
-		consumedQuota := user.LevelUsageQuota
+		consumedQuota := int64(user.UsedQuota)
 		if consumedQuota < 0 {
 			consumedQuota = 0
 		}

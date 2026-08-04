@@ -1,7 +1,6 @@
 package service
 
 import (
-	"errors"
 	"net/http/httptest"
 	"testing"
 
@@ -16,24 +15,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-type committedSettlementStub struct{}
-
-func (committedSettlementStub) Settle(int) error          { return errors.New("token quota adjustment failed") }
-func (committedSettlementStub) Refund(*gin.Context) error { return nil }
-func (committedSettlementStub) NeedsRefund() bool         { return false }
-func (committedSettlementStub) GetPreConsumedQuota() int  { return 0 }
-func (committedSettlementStub) Reserve(int) error         { return nil }
-func (committedSettlementStub) FundingSettled() bool      { return true }
-
-type failedSettlementStub struct{}
-
-func (failedSettlementStub) Settle(int) error          { return errors.New("funding settlement failed") }
-func (failedSettlementStub) Refund(*gin.Context) error { return nil }
-func (failedSettlementStub) NeedsRefund() bool         { return false }
-func (failedSettlementStub) GetPreConsumedQuota() int  { return 0 }
-func (failedSettlementStub) Reserve(int) error         { return nil }
-func (failedSettlementStub) FundingSettled() bool      { return false }
 
 func applyUserLevelConfigForServiceTest(t *testing.T, value user_level_setting.UserLevelConfig) {
 	t.Helper()
@@ -160,12 +141,12 @@ func TestGetUserLevelStatusBuildsClaimAndProgressFromConsumedQuota(t *testing.T)
 	}
 	applyUserLevelConfigForServiceTest(t, config)
 	user := &model.User{
-		Id:              951,
-		Username:        "level-status",
-		AffCode:         "level-status-951",
-		Status:          common.UserStatusEnabled,
-		LevelKey:        "silver",
-		LevelUsageQuota: 750_000,
+		Id:        951,
+		Username:  "level-status",
+		AffCode:   "level-status-951",
+		Status:    common.UserStatusEnabled,
+		LevelKey:  "silver",
+		UsedQuota: 750_000,
 	}
 	require.NoError(t, model.DB.Create(user).Error)
 
@@ -178,59 +159,11 @@ func TestGetUserLevelStatusBuildsClaimAndProgressFromConsumedQuota(t *testing.T)
 	assert.EqualValues(t, 250_000, status.Progress.Remaining)
 	assert.Equal(t, 50.0, status.Progress.Percent)
 
-	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("level_consumed_quota", 1_050_000).Error)
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("used_quota", 1_050_000).Error)
 	status, err = GetUserLevelStatus(user.Id)
 	require.NoError(t, err)
 	require.NotNil(t, status.ClaimableLevel)
 	assert.Equal(t, "gold", status.ClaimableLevel.ID)
 	assert.EqualValues(t, 1_050_000, status.TotalConsumedQuota)
 	assert.Zero(t, status.Progress.Remaining)
-}
-
-func TestCommittedSettlementStillRecordsUserLevelUsageWhenTokenAdjustmentFails(t *testing.T) {
-	truncate(t)
-	const userID = 952
-	const channelID = 952
-	seedUser(t, userID, 1_000)
-	seedChannel(t, channelID)
-	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	relayInfo := &relaycommon.RelayInfo{
-		UserId:      userID,
-		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channelID},
-		Billing:     committedSettlementStub{},
-	}
-
-	settleBillingAndRecordUsage(ctx, relayInfo, 75, true)
-
-	var user model.User
-	require.NoError(t, model.DB.First(&user, userID).Error)
-	assert.Equal(t, 75, user.UsedQuota)
-	assert.EqualValues(t, 75, user.LevelUsageQuota)
-	assert.Equal(t, 1, user.RequestCount)
-}
-
-func TestFailedSettlementPreservesUsageStatsWithoutAdvancingUserLevel(t *testing.T) {
-	truncate(t)
-	const userID = 953
-	const channelID = 953
-	seedUser(t, userID, 1_000)
-	seedChannel(t, channelID)
-	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	relayInfo := &relaycommon.RelayInfo{
-		UserId:      userID,
-		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channelID},
-		Billing:     failedSettlementStub{},
-	}
-
-	settleBillingAndRecordUsage(ctx, relayInfo, 75, true)
-
-	var user model.User
-	require.NoError(t, model.DB.First(&user, userID).Error)
-	assert.Equal(t, 75, user.UsedQuota)
-	assert.Zero(t, user.LevelUsageQuota)
-	assert.Equal(t, 1, user.RequestCount)
-
-	var channel model.Channel
-	require.NoError(t, model.DB.First(&channel, channelID).Error)
-	assert.EqualValues(t, 75, channel.UsedQuota)
 }
