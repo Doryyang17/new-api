@@ -378,6 +378,7 @@ func GetAllUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	decorateUsersWithLevels(users)
 
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(users)
@@ -408,6 +409,7 @@ func SearchUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	decorateUsersWithLevels(users)
 
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(users)
@@ -435,6 +437,7 @@ func GetUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
 		return
 	}
+	decorateUsersWithLevels([]*model.User{user})
 	totalTopUpQuota, err := model.GetUserTopUpQuota(id)
 	if err != nil {
 		common.ApiError(c, err)
@@ -588,6 +591,7 @@ func buildSelfUserData(user *model.User) map[string]interface{} {
 		"wechat_id":         user.WeChatId,
 		"telegram_id":       user.TelegramId,
 		"group":             user.Group,
+		"level_key":         user.LevelKey,
 		"quota":             user.Quota,
 		"used_quota":        user.UsedQuota,
 		"request_count":     user.RequestCount,

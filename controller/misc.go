@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/setting/user_level_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -125,6 +126,7 @@ func GetStatus(c *gin.Context) {
 		"user_agreement_enabled":      legalSetting.UserAgreement != "",
 		"privacy_policy_enabled":      legalSetting.PrivacyPolicy != "",
 		"checkin_enabled":             operation_setting.GetCheckinSetting().Enabled,
+		"user_level_enabled":          user_level_setting.IsEnabled(),
 	}
 	availabilityStatus := system_setting.GetAvailabilityStatus()
 	data["system_availability"] = gin.H{

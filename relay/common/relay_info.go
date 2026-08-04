@@ -87,6 +87,7 @@ type RelayInfo struct {
 	UserId            int
 	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
 	UserGroup         string // 用户所在分组
+	UserLevelKey      string // 用户已领取的等级 key
 	TokenUnlimited    bool
 	StartTime         time.Time
 	FirstResponseTime time.Time
@@ -154,6 +155,12 @@ type RelayInfo struct {
 	RuntimeHeadersOverride    map[string]interface{}
 	UseRuntimeHeadersOverride bool
 	ParamOverrideAudit        []string
+	UserLevelResolved         bool
+	UserLevelEnabled          bool
+	UserLevelID               string
+	UserLevelName             string
+	UserLevelRatio            float64
+	UserLevelColor            string
 
 	// UpstreamRequestBodySize is the byte size of the marshaled upstream request
 	// body. It is set when the body is wrapped in a BodyStorage (see
@@ -481,12 +488,13 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	info := &RelayInfo{
 		Request: request,
 
-		RequestId:  reqId,
-		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
-		UsingGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
-		UserGroup:  common.GetContextKeyString(c, constant.ContextKeyUserGroup),
-		UserQuota:  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
-		UserEmail:  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
+		RequestId:    reqId,
+		UserId:       common.GetContextKeyInt(c, constant.ContextKeyUserId),
+		UsingGroup:   common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+		UserGroup:    common.GetContextKeyString(c, constant.ContextKeyUserGroup),
+		UserLevelKey: common.GetContextKeyString(c, constant.ContextKeyUserLevel),
+		UserQuota:    common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
+		UserEmail:    common.GetContextKeyString(c, constant.ContextKeyUserEmail),
 
 		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 

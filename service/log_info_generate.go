@@ -79,6 +79,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	other["cache_ratio"] = cacheRatio
 	other["model_price"] = modelPrice
 	other["user_group_ratio"] = userGroupRatio
+	appendUserLevelBillingInfo(relayInfo.PriceData.GroupRatioInfo, other)
 	other["frt"] = float64(relayInfo.FirstResponseTime.UnixMilli() - relayInfo.StartTime.UnixMilli())
 	if relayInfo.ReasoningEffort != "" {
 		other["reasoning_effort"] = relayInfo.ReasoningEffort
@@ -218,6 +219,20 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 	}
 }
 
+func appendUserLevelBillingInfo(info hosttypes.GroupRatioInfo, other map[string]interface{}) {
+	if other == nil {
+		return
+	}
+	if !info.HasUserLevel {
+		return
+	}
+	other["base_group_ratio"] = info.BaseGroupRatio
+	other["user_level_id"] = info.UserLevelID
+	other["user_level_name"] = info.UserLevelName
+	other["user_level_ratio"] = info.UserLevelRatio
+	other["user_level_color"] = info.UserLevelColor
+}
+
 func appendRequestConversionChain(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
 	if relayInfo == nil || other == nil {
 		return
@@ -309,6 +324,7 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData hosttypes.P
 	if priceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = priceData.GroupRatioInfo.GroupSpecialRatio
 	}
+	appendUserLevelBillingInfo(priceData.GroupRatioInfo, other)
 	appendRequestPath(nil, relayInfo, other)
 	appendBillingInfo(relayInfo, other)
 	return other

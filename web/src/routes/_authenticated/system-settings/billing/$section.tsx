@@ -34,6 +34,12 @@ export const Route = createFileRoute(
         params: { section: 'checkin' },
       })
     }
+    if (params.section === 'user-levels') {
+      throw redirect({
+        to: '/system-settings/custom/$section',
+        params: { section: 'user-levels' },
+      })
+    }
 
     const validSections = BILLING_SECTION_IDS as unknown as string[]
     if (!validSections.includes(params.section)) {

@@ -104,7 +104,10 @@ func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.B
 	}
 
 	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
-	if snap.GroupRatio == groupRatio {
+	groupRatioInfo := relayInfo.PriceData.GroupRatioInfo
+	if snap.GroupRatio == groupRatio &&
+		snap.BaseGroupRatio == groupRatioInfo.BaseGroupRatio &&
+		snap.UserLevelRatio == groupRatioInfo.UserLevelRatio {
 		return snap, nil
 	}
 
@@ -114,6 +117,10 @@ func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.B
 		return nil, err
 	}
 	snap.GroupRatio = groupRatio
+	snap.BaseGroupRatio = groupRatioInfo.BaseGroupRatio
+	snap.UserLevelID = groupRatioInfo.UserLevelID
+	snap.UserLevelName = groupRatioInfo.UserLevelName
+	snap.UserLevelRatio = groupRatioInfo.UserLevelRatio
 	snap.EstimatedQuotaAfterGroup = estimatedQuota
 	return snap, nil
 }

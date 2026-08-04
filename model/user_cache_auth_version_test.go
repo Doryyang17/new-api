@@ -101,6 +101,27 @@ func TestUserAuthFieldUpdateRejectsVersionMismatch(t *testing.T) {
 	assert.Equal(t, "current", group)
 }
 
+func TestPopulateUserCachePreservesLevelKey(t *testing.T) {
+	truncateTables(t)
+	useUserCacheMiniRedis(t)
+
+	user := User{
+		Username:    "level-cache-user",
+		Password:    "password",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+		LevelKey:    "gold",
+		AuthVersion: 1,
+	}
+	require.NoError(t, DB.Create(&user).Error)
+	require.NoError(t, populateUserCache(user))
+
+	cached, err := cacheGetUserBase(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, "gold", cached.LevelKey)
+}
+
 func TestRefreshUserGroupCacheRepairsDelayedSameVersionWrite(t *testing.T) {
 	truncateTables(t)
 	useUserCacheMiniRedis(t)

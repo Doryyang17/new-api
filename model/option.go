@@ -1,8 +1,11 @@
 package model
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -12,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/setting/user_level_setting"
 	"gorm.io/gorm"
 )
 
@@ -19,6 +23,10 @@ type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
 	Value string `json:"value"`
 }
+
+var ErrUserLevelConfigConflict = errors.New("用户等级配置已被其他管理员更新，请刷新后重试")
+
+var userLevelConfigSaveMu sync.Mutex
 
 func AllOption() ([]*Option, error) {
 	var options []*Option
@@ -191,10 +199,26 @@ func InitOptionMap() {
 func loadOptionsFromDatabase() {
 	options, _ := AllOption()
 	for _, option := range options {
+		// User-level billing is revisioned and published under its own lock below;
+		// never apply the potentially stale value captured by AllOption.
+		if option.Key == user_level_setting.OptionKey {
+			continue
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
+	}
+
+	userLevelConfigSaveMu.Lock()
+	var current Option
+	err := DB.Where("key = ?", user_level_setting.OptionKey).First(&current).Error
+	if err == nil {
+		err = updateOptionMap(current.Key, current.Value)
+	}
+	userLevelConfigSaveMu.Unlock()
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		common.SysLog("failed to sync user level option: " + err.Error())
 	}
 }
 
@@ -209,6 +233,9 @@ func SyncOptions(frequency int) {
 func validateOptionValue(key string, value string) error {
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
+	}
+	if key == user_level_setting.OptionKey {
+		return fmt.Errorf("用户等级配置必须使用专用更新流程")
 	}
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
@@ -225,14 +252,137 @@ func UpdateOption(key string, value string) error {
 		Key: key,
 	}
 	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
+	if err := DB.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
 	option.Value = value
 	// Save is a combination function.
 	// If save value does not contain primary key, it will execute Create,
 	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
+	if err := DB.Save(&option).Error; err != nil {
+		return err
+	}
 	// Update OptionMap
 	return updateOptionMap(key, value)
+}
+
+// GetUserLevelConfigSnapshot reads the database source of truth used by the
+// admin editor and pairs it with an opaque optimistic-concurrency revision.
+func GetUserLevelConfigSnapshot() (user_level_setting.UserLevelConfig, string, error) {
+	var option Option
+	err := DB.Where("key = ?", user_level_setting.OptionKey).First(&option).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		current := user_level_setting.DefaultConfig()
+		revision, revisionErr := user_level_setting.ConfigRevision(current)
+		return current, revision, revisionErr
+	}
+	if err != nil {
+		return user_level_setting.UserLevelConfig{}, "", err
+	}
+
+	current, err := user_level_setting.ParseConfigJSON([]byte(option.Value))
+	if err != nil {
+		return user_level_setting.UserLevelConfig{}, "", err
+	}
+	revision, err := user_level_setting.ConfigRevision(current)
+	if err != nil {
+		return user_level_setting.UserLevelConfig{}, "", err
+	}
+	return current, revision, nil
+}
+
+// SaveUserLevelConfig validates the transition against the database-current
+// option and the revision read by the administrator. MySQL/PostgreSQL lock the
+// option row so text collations cannot weaken the revision check; SQLite keeps
+// the same read-check-write sequence inside one transaction.
+func SaveUserLevelConfig(next user_level_setting.UserLevelConfig, expectedRevision string) (user_level_setting.UserLevelConfig, user_level_setting.UserLevelConfig, error) {
+	normalized, err := user_level_setting.NormalizeAndValidate(next)
+	if err != nil {
+		return user_level_setting.UserLevelConfig{}, user_level_setting.UserLevelConfig{}, err
+	}
+	data, err := common.Marshal(normalized)
+	if err != nil {
+		return user_level_setting.UserLevelConfig{}, user_level_setting.UserLevelConfig{}, err
+	}
+	nextValue := string(data)
+
+	// Keep the durable write and local runtime publication ordered on this
+	// instance. Cross-instance propagation remains handled by SyncOptions.
+	userLevelConfigSaveMu.Lock()
+	defer userLevelConfigSaveMu.Unlock()
+
+	var previous user_level_setting.UserLevelConfig
+	createAttempted := false
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		var option Option
+		queryErr := lockForUpdate(tx).
+			Where("key = ?", user_level_setting.OptionKey).
+			First(&option).Error
+		if errors.Is(queryErr, gorm.ErrRecordNotFound) {
+			previous = user_level_setting.DefaultConfig()
+			currentRevision, revisionErr := user_level_setting.ConfigRevision(previous)
+			if revisionErr != nil {
+				return revisionErr
+			}
+			if expectedRevision != currentRevision {
+				return ErrUserLevelConfigConflict
+			}
+			if transitionErr := user_level_setting.ValidateTransition(previous, normalized); transitionErr != nil {
+				return transitionErr
+			}
+			createAttempted = true
+			if createErr := tx.Create(&Option{Key: user_level_setting.OptionKey, Value: nextValue}).Error; createErr != nil {
+				return createErr
+			}
+			return nil
+		}
+		if queryErr != nil {
+			return queryErr
+		}
+
+		previous, queryErr = user_level_setting.ParseConfigJSON([]byte(option.Value))
+		if queryErr != nil {
+			return queryErr
+		}
+		currentRevision, revisionErr := user_level_setting.ConfigRevision(previous)
+		if revisionErr != nil {
+			return revisionErr
+		}
+		if expectedRevision != currentRevision {
+			return ErrUserLevelConfigConflict
+		}
+		if transitionErr := user_level_setting.ValidateTransition(previous, normalized); transitionErr != nil {
+			return fmt.Errorf("%w: %v", ErrUserLevelConfigConflict, transitionErr)
+		}
+		if option.Value == nextValue {
+			return nil
+		}
+		result := tx.Model(&Option{}).
+			Where("key = ?", user_level_setting.OptionKey).
+			Update("value", nextValue)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrUserLevelConfigConflict
+		}
+		return nil
+	})
+	if err != nil {
+		if createAttempted {
+			// PostgreSQL aborts the transaction after a unique-key violation, so
+			// confirm a concurrent first writer using a fresh database handle.
+			var current Option
+			if lookupErr := DB.Where("key = ?", user_level_setting.OptionKey).First(&current).Error; lookupErr == nil {
+				return previous, user_level_setting.UserLevelConfig{}, ErrUserLevelConfigConflict
+			}
+		}
+		return previous, user_level_setting.UserLevelConfig{}, err
+	}
+	if err := updateOptionMap(user_level_setting.OptionKey, nextValue); err != nil {
+		return previous, user_level_setting.UserLevelConfig{}, err
+	}
+	return previous, normalized, nil
 }
 
 // UpdateOptionsBulk persists multiple key/value pairs in a single database

@@ -5,9 +5,13 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/setting/user_level_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -130,4 +134,69 @@ func GetUserGroupRatio(userGroup, group string) float64 {
 		return ratio
 	}
 	return ratio_setting.GetGroupRatio(group)
+}
+
+func ResolveUserGroupRatio(userGroup, usingGroup, levelKey string) hosttypes.GroupRatioInfo {
+	level := user_level_setting.ResolveBillingLevel(levelKey)
+	return resolveUserGroupRatio(userGroup, usingGroup, level)
+}
+
+func ResolveGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hosttypes.GroupRatioInfo {
+	if autoGroup, exists := common.GetContextKey(ctx, constant.ContextKeyAutoGroup); exists {
+		if group, ok := autoGroup.(string); ok && group != "" {
+			logger.LogDebug(ctx, "final group: %s", group)
+			relayInfo.UsingGroup = group
+		}
+	}
+
+	if !relayInfo.UserLevelResolved {
+		level := user_level_setting.ResolveBillingLevel(relayInfo.UserLevelKey)
+		relayInfo.UserLevelResolved = true
+		relayInfo.UserLevelEnabled = level.Enabled
+		relayInfo.UserLevelID = level.ID
+		relayInfo.UserLevelName = level.Name
+		relayInfo.UserLevelRatio = level.Ratio
+		relayInfo.UserLevelColor = level.BadgeColor
+	}
+	level := user_level_setting.BillingLevel{
+		Enabled:    relayInfo.UserLevelEnabled,
+		ID:         relayInfo.UserLevelID,
+		Name:       relayInfo.UserLevelName,
+		Ratio:      relayInfo.UserLevelRatio,
+		BadgeColor: relayInfo.UserLevelColor,
+	}
+	if level.Ratio <= 0 {
+		level.Ratio = 1
+	}
+	return resolveUserGroupRatio(relayInfo.UserGroup, relayInfo.UsingGroup, level)
+}
+
+func resolveUserGroupRatio(userGroup, usingGroup string, level user_level_setting.BillingLevel) hosttypes.GroupRatioInfo {
+	baseRatio := ratio_setting.GetGroupRatio(usingGroup)
+	specialRatio, hasSpecialRatio := ratio_setting.GetGroupGroupRatio(userGroup, usingGroup)
+	if hasSpecialRatio {
+		baseRatio = specialRatio
+	}
+	levelRatio := level.Ratio
+	if levelRatio <= 0 {
+		levelRatio = 1
+	}
+	effectiveRatio := baseRatio * levelRatio
+	groupRatioInfo := hosttypes.GroupRatioInfo{
+		GroupRatio:        effectiveRatio,
+		BaseGroupRatio:    baseRatio,
+		GroupSpecialRatio: -1,
+		HasSpecialRatio:   hasSpecialRatio,
+		UserLevelID:       level.ID,
+		UserLevelName:     level.Name,
+		UserLevelRatio:    levelRatio,
+		UserLevelColor:    level.BadgeColor,
+		HasUserLevel:      level.Enabled,
+	}
+	if hasSpecialRatio {
+		// Keep this compatibility field effective so legacy log consumers still
+		// display the amount that was actually charged.
+		groupRatioInfo.GroupSpecialRatio = effectiveRatio
+	}
+	return groupRatioInfo
 }

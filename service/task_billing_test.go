@@ -254,6 +254,40 @@ func TestTaskBillingContextPriceDataFiltersMultiplier(t *testing.T) {
 	}, priceData.OtherRatios())
 }
 
+func TestRecalculateTaskQuotaByTokensUsesFrozenUserLevelSnapshot(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	const userID, tokenID, channelID = 41, 41, 41
+	const initialQuota, tokenRemain, preConsumed = 10_000, 10_000, 1_000
+
+	seedUser(t, userID, initialQuota)
+	seedToken(t, tokenID, userID, "sk-level-snapshot", tokenRemain)
+	seedChannel(t, channelID)
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		SnapshotVersion: 1,
+		ModelRatio:      2,
+		BaseGroupRatio:  1.5,
+		UserLevelID:     "gold",
+		UserLevelName:   "黄金会员",
+		UserLevelRatio:  0.8,
+		GroupRatio:      1.2,
+		OriginModelName: "test-model",
+	}
+
+	RecalculateTaskQuotaByTokens(ctx, task, 1_000)
+
+	const expectedQuota = 2_400
+	assert.Equal(t, expectedQuota, task.Quota)
+	assert.Equal(t, initialQuota-(expectedQuota-preConsumed), getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain-(expectedQuota-preConsumed), getTokenRemainQuota(t, tokenID))
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Contains(t, log.Other, `"user_level_id":"gold"`)
+	assert.Contains(t, log.Other, `"base_group_ratio":1.5`)
+	assert.Contains(t, log.Other, `"group_ratio":1.2`)
+}
+
 // ---------------------------------------------------------------------------
 // Read-back helpers
 // ---------------------------------------------------------------------------
@@ -334,7 +368,6 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	seedUser(t, userID, initQuota)
 	seedToken(t, tokenID, userID, "sk-test-key", tokenRemain)
 	seedChannel(t, channelID)
-
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 	require.NoError(t, model.DB.Create(task).Error)
 
@@ -346,7 +379,6 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	// Token remain_quota should increase, used_quota should decrease
 	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
 	assert.Equal(t, -preConsumed, getTokenUsedQuota(t, tokenID))
-
 	// A refund log should be created
 	log := getLastLog(t)
 	require.NotNil(t, log)
@@ -492,7 +524,6 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	seedUser(t, userID, initQuota)
 	seedToken(t, tokenID, userID, "sk-recalc-pos", tokenRemain)
 	seedChannel(t, channelID)
-
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 
 	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
@@ -502,7 +533,6 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 
 	// Token should also be charged the delta
 	assert.Equal(t, tokenRemain-(actualQuota-preConsumed), getTokenRemainQuota(t, tokenID))
-
 	// task.Quota should be updated to actualQuota
 	assert.Equal(t, actualQuota, task.Quota)
 
@@ -525,7 +555,6 @@ func TestRecalculate_NegativeDelta(t *testing.T) {
 	seedUser(t, userID, initQuota)
 	seedToken(t, tokenID, userID, "sk-recalc-neg", tokenRemain)
 	seedChannel(t, channelID)
-
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 
 	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
@@ -535,7 +564,6 @@ func TestRecalculate_NegativeDelta(t *testing.T) {
 
 	// Token should be refunded the difference
 	assert.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, tokenID))
-
 	// task.Quota updated
 	assert.Equal(t, actualQuota, task.Quota)
 

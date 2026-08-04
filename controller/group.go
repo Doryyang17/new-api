@@ -3,6 +3,8 @@ package controller
 import (
 	"net/http"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -25,16 +27,25 @@ func GetGroups(c *gin.Context) {
 
 func GetUserGroups(c *gin.Context) {
 	usableGroups := make(map[string]map[string]interface{})
-	userGroup := ""
+	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	levelKey := common.GetContextKeyString(c, constant.ContextKeyUserLevel)
 	userId := c.GetInt("id")
-	userGroup, _ = model.GetUserGroup(userId, false)
+	if userId > 0 && userGroup == "" {
+		if user, err := model.GetUserCache(userId); err == nil {
+			userGroup = user.Group
+			levelKey = user.LevelKey
+		}
+	}
 	userUsableGroups := service.GetUserUsableGroups(userGroup)
 	for groupName, _ := range ratio_setting.GetGroupRatioCopy() {
 		// UserUsableGroups contains the groups that the user can use
 		if desc, ok := userUsableGroups[groupName]; ok {
+			ratioInfo := service.ResolveUserGroupRatio(userGroup, groupName, levelKey)
 			usableGroups[groupName] = map[string]interface{}{
-				"ratio": service.GetUserGroupRatio(userGroup, groupName),
-				"desc":  desc,
+				"ratio":            ratioInfo.GroupRatio,
+				"base_ratio":       ratioInfo.BaseGroupRatio,
+				"user_level_ratio": ratioInfo.UserLevelRatio,
+				"desc":             desc,
 			}
 		}
 	}

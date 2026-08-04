@@ -231,7 +231,15 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 			won, err := task.UpdateWithStatus(preStatus)
 			if err != nil {
 				logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
-			} else if won && shouldReturnQuota {
+			} else if won {
+				if task.Status == string(model.TaskStatusSuccess) && task.Progress == "100%" {
+					if _, reconcileErr := model.ReconcileMidjourneyLevelConsumedQuota(task.Id); reconcileErr != nil {
+						logger.LogError(ctx, fmt.Sprintf("更新 Midjourney 任务等级进度失败 task %s: %v", task.MjId, reconcileErr))
+					}
+				}
+				if !shouldReturnQuota {
+					continue
+				}
 				restoreForRetry := func() {
 					failedStatus := task.Status
 					*task = preTask
@@ -289,6 +297,9 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 					if _, statusErr := model.UpdateMidjourneyBillingStatus(task.Id, model.MidjourneyBillingStatusCharged, model.MidjourneyBillingStatusRefunded); statusErr != nil {
 						logger.LogError(ctx, "fail to mark midjourney billing refunded: "+statusErr.Error())
 					}
+				}
+				if _, reconcileErr := model.ReconcileMidjourneyLevelConsumedQuota(task.Id); reconcileErr != nil {
+					logger.LogError(ctx, fmt.Sprintf("回退 Midjourney 任务等级进度失败 task %s: %v", task.MjId, reconcileErr))
 				}
 				model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 					UserId:    task.UserId,

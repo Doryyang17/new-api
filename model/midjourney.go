@@ -25,13 +25,16 @@ type Midjourney struct {
 	Properties  string `json:"properties"`
 	// Internal billing split used by async failure refunds. Never expose these
 	// fields through task APIs.
-	BillingRequestId     string `json:"-" gorm:"type:varchar(191);index"`
-	BillingSource        string `json:"-" gorm:"type:varchar(20)"`
-	SubscriptionId       int    `json:"-"`
-	CheckinBonusConsumed int    `json:"-"`
-	TokenId              int    `json:"-"`
-	BillingStatus        string `json:"-" gorm:"type:varchar(20);index"`
-	BillingPendingAt     int64  `json:"-" gorm:"index"`
+	BillingRequestId      string `json:"-" gorm:"type:varchar(191);index"`
+	BillingSource         string `json:"-" gorm:"type:varchar(20)"`
+	SubscriptionId        int    `json:"-"`
+	CheckinBonusConsumed  int    `json:"-"`
+	TokenId               int    `json:"-"`
+	BillingStatus         string `json:"-" gorm:"type:varchar(20);index"`
+	BillingPendingAt      int64  `json:"-" gorm:"index"`
+	LevelProgressEligible bool   `json:"-" gorm:"column:level_progress_eligible;index:idx_midjourneys_level_progress_pending,priority:2"`
+	LevelProgressPending  bool   `json:"-" gorm:"column:level_progress_pending;index:idx_midjourneys_level_progress_pending,priority:1"`
+	LevelProgressQuota    int64  `json:"-" gorm:"type:bigint;column:level_progress_quota"`
 }
 
 const (
@@ -41,10 +44,20 @@ const (
 	MidjourneyBillingStatusFailed   = "failed"
 )
 
+func (midjourney *Midjourney) MarkBillingPending(pendingAt int64) {
+	midjourney.BillingStatus = MidjourneyBillingStatusPending
+	midjourney.BillingPendingAt = pendingAt
+	midjourney.LevelProgressEligible = true
+	midjourney.LevelProgressPending = true
+}
+
 func UpdateMidjourneyBillingStatus(taskId int, fromStatus string, toStatus string) (bool, error) {
 	result := DB.Model(&Midjourney{}).
 		Where("id = ? AND billing_status = ?", taskId, fromStatus).
-		Update("billing_status", toStatus)
+		Updates(map[string]interface{}{
+			"billing_status":         toStatus,
+			"level_progress_pending": true,
+		})
 	return result.RowsAffected > 0, result.Error
 }
 
@@ -55,13 +68,14 @@ func FailPendingMidjourneyBilling(taskId int, reason string) (bool, error) {
 	result := DB.Model(&Midjourney{}).
 		Where("id = ? AND billing_status = ?", taskId, MidjourneyBillingStatusPending).
 		Updates(map[string]interface{}{
-			"code":               4,
-			"quota":              0,
-			"status":             "FAILURE",
-			"progress":           "100%",
-			"fail_reason":        reason,
-			"billing_status":     MidjourneyBillingStatusFailed,
-			"billing_pending_at": 0,
+			"code":                   4,
+			"quota":                  0,
+			"status":                 "FAILURE",
+			"progress":               "100%",
+			"fail_reason":            reason,
+			"billing_status":         MidjourneyBillingStatusFailed,
+			"billing_pending_at":     0,
+			"level_progress_pending": true,
 		})
 	return result.RowsAffected > 0, result.Error
 }
@@ -220,9 +234,27 @@ func (midjourney *Midjourney) Insert() error {
 }
 
 func (midjourney *Midjourney) Update() error {
-	var err error
-	err = DB.Save(midjourney).Error
-	return err
+	needsProgressReconciliation := midjourney.needsLevelProgressReconciliation()
+	if needsProgressReconciliation {
+		midjourney.LevelProgressPending = true
+	}
+	// Reconciliation owns the durable eligibility/quota snapshot; a stale task
+	// object may only re-arm the pending marker, never overwrite that snapshot.
+	update := DB.Model(midjourney).Select("*").Omit("level_progress_eligible", "level_progress_quota")
+	if !needsProgressReconciliation {
+		update = update.Omit("level_progress_pending")
+	}
+	return update.Updates(midjourney).Error
+}
+
+func (midjourney *Midjourney) needsLevelProgressReconciliation() bool {
+	if !midjourney.LevelProgressEligible {
+		return false
+	}
+	return midjourney.Status == string(TaskStatusSuccess) ||
+		midjourney.Status == string(TaskStatusFailure) ||
+		midjourney.BillingStatus == MidjourneyBillingStatusRefunded ||
+		midjourney.BillingStatus == MidjourneyBillingStatusFailed
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
@@ -231,7 +263,16 @@ func (midjourney *Midjourney) Update() error {
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
 // Uses Model().Select("*").Updates() to avoid GORM Save()'s INSERT fallback.
 func (midjourney *Midjourney) UpdateWithStatus(fromStatus string) (bool, error) {
-	result := DB.Model(midjourney).Where("status = ?", fromStatus).Select("*").Updates(midjourney)
+	needsProgressReconciliation := midjourney.needsLevelProgressReconciliation()
+	if needsProgressReconciliation {
+		midjourney.LevelProgressPending = true
+	}
+	// Keep reconciliation-owned columns out of full-row CAS updates.
+	update := DB.Model(midjourney).Where("status = ?", fromStatus).Select("*").Omit("level_progress_eligible", "level_progress_quota")
+	if !needsProgressReconciliation {
+		update = update.Omit("level_progress_pending")
+	}
+	result := update.Updates(midjourney)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -239,12 +280,20 @@ func (midjourney *Midjourney) UpdateWithStatus(fromStatus string) (bool, error) 
 }
 
 func MjBulkUpdate(mjIds []string, params map[string]any) error {
+	if _, changesStatus := params["status"]; changesStatus {
+		params = cloneUpdateParams(params)
+		params["level_progress_pending"] = true
+	}
 	return DB.Model(&Midjourney{}).
 		Where("mj_id in (?)", mjIds).
 		Updates(params).Error
 }
 
 func MjBulkUpdateByTaskIds(taskIDs []int, params map[string]any) error {
+	if _, changesStatus := params["status"]; changesStatus {
+		params = cloneUpdateParams(params)
+		params["level_progress_pending"] = true
+	}
 	return DB.Model(&Midjourney{}).
 		Where("id in (?)", taskIDs).
 		Updates(params).Error

@@ -45,6 +45,8 @@ export interface UserProfile {
   email?: string
   /** User group */
   group: string
+  /** Claimed user level key */
+  level_key?: string
   /** Current quota balance */
   quota: number
   /** Total used quota */

@@ -598,12 +598,13 @@ func RelayTask(c *gin.Context) {
 
 	// ── 成功：结算 + 日志 + 插入任务 ──
 	if taskErr == nil {
-		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+		fundingSettled, settleErr := service.SettleBilling(c, relayInfo, result.Quota)
+		if settleErr != nil {
 			common.SysError("settle task billing error: " + settleErr.Error())
 		}
 		service.LogTaskConsumption(c, relayInfo)
 
-		task := model.InitTask(result.Platform, relayInfo)
+		task := model.InitTask(result.Platform, relayInfo, fundingSettled)
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 		task.PrivateData.BillingSource = relayInfo.BillingSource
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
@@ -611,14 +612,22 @@ func RelayTask(c *gin.Context) {
 		task.PrivateData.CheckinBonusConsumed = relayInfo.CheckinBonusConsumed
 		task.PrivateData.TokenId = relayInfo.TokenId
 		task.PrivateData.NodeName = common.NodeName
-		task.PrivateData.BillingContext = &model.TaskBillingContext{
+		billingContext := &model.TaskBillingContext{
+			SnapshotVersion: 1,
 			ModelPrice:      relayInfo.PriceData.ModelPrice,
+			BaseGroupRatio:  relayInfo.PriceData.GroupRatioInfo.BaseGroupRatio,
 			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
 			ModelRatio:      relayInfo.PriceData.ModelRatio,
 			OtherRatios:     relayInfo.PriceData.OtherRatios(),
 			OriginModelName: relayInfo.OriginModelName,
 			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		}
+		if relayInfo.PriceData.GroupRatioInfo.HasUserLevel {
+			billingContext.UserLevelID = relayInfo.PriceData.GroupRatioInfo.UserLevelID
+			billingContext.UserLevelName = relayInfo.PriceData.GroupRatioInfo.UserLevelName
+			billingContext.UserLevelRatio = relayInfo.PriceData.GroupRatioInfo.UserLevelRatio
+		}
+		task.PrivateData.BillingContext = billingContext
 		task.Quota = result.Quota
 		task.Data = result.TaskData
 		task.Action = relayInfo.Action

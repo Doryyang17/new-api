@@ -67,6 +67,8 @@ func TestMain(m *testing.M) {
 		&CheckinBonusUsage{},
 		&CheckinBonusProcessLease{},
 		&Midjourney{},
+		&UserLevelClaim{},
+		&Option{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -88,6 +90,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM tokens")
 		DB.Exec("DELETE FROM announcement_reads")
 		DB.Exec("DELETE FROM user_oauth_bindings")
+		DB.Exec("DELETE FROM user_level_claims")
 		DB.Exec("DELETE FROM users")
 		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM request_risk_log_details")
@@ -109,6 +112,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM checkin_bonuses")
 		DB.Exec("DELETE FROM checkins")
 		DB.Exec("DELETE FROM midjourneys")
+		DB.Exec("DELETE FROM options")
 	})
 }
 

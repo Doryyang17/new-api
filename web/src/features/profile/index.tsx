@@ -21,6 +21,7 @@ import {
   CardStaggerContainer,
   CardStaggerItem,
 } from '@/components/page-transition'
+import { UserLevelCard, useUserLevelStatus } from '@/features/user-levels'
 import { useStatus } from '@/hooks/use-status'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -40,6 +41,10 @@ export function Profile() {
   const permissions = useAuthStore((s) => s.auth.user?.permissions)
 
   const checkinEnabled = status?.checkin_enabled === true
+  const userLevelEnabled = status?.user_level_enabled === true
+  const levelQuery = useUserLevelStatus(userLevelEnabled)
+  const resolvedUserLevelEnabled =
+    userLevelEnabled && levelQuery.data?.enabled !== false
   const turnstileEnabled = !!(
     status?.turnstile_check && status?.turnstile_site_key
   )
@@ -55,12 +60,19 @@ export function Profile() {
               profile={profile}
               loading={loading}
               checkinEnabled={checkinEnabled}
+              userLevelEnabled={resolvedUserLevelEnabled}
+              levelLoading={levelQuery.isLoading}
+              currentLevel={
+                resolvedUserLevelEnabled
+                  ? levelQuery.data?.current_level
+                  : undefined
+              }
             />
           </CardStaggerItem>
 
           <CardStaggerItem>
             <div className='grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.46fr)] xl:items-start'>
-              <div className='order-2 space-y-4 sm:space-y-6 xl:order-1'>
+              <div className='order-3 space-y-4 sm:space-y-6 xl:order-1'>
                 <ProfileSettingsCard
                   profile={profile}
                   loading={loading}
@@ -71,8 +83,20 @@ export function Profile() {
               </div>
 
               <div className='contents xl:sticky xl:top-6 xl:order-2 xl:block xl:space-y-6 xl:self-start'>
-                {checkinEnabled && (
+                {resolvedUserLevelEnabled && (
                   <div className='order-1'>
+                    <UserLevelCard
+                      status={levelQuery.data}
+                      isLoading={levelQuery.isLoading}
+                      isError={levelQuery.isError}
+                      onRetry={() => {
+                        void levelQuery.refetch()
+                      }}
+                    />
+                  </div>
+                )}
+                {checkinEnabled && (
+                  <div className='order-2'>
                     <CheckinCalendarCard
                       checkinEnabled={checkinEnabled}
                       turnstileEnabled={turnstileEnabled}
@@ -80,7 +104,7 @@ export function Profile() {
                     />
                   </div>
                 )}
-                <div className='order-3 space-y-4 sm:space-y-6'>
+                <div className='order-4 space-y-4 sm:space-y-6'>
                   {canConfigureSidebar && <SidebarModulesCard />}
                   <PasskeyCard loading={loading} />
                   <TwoFACard loading={loading} />

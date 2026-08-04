@@ -482,6 +482,7 @@ func ConsumeCheckinBonusFunding(params CheckinBonusImmediateChargeParams) (*Chec
 					"token_id":               params.TokenId,
 					"billing_status":         MidjourneyBillingStatusCharged,
 					"billing_pending_at":     0,
+					"level_progress_pending": true,
 				})
 			if update.Error != nil {
 				return update.Error

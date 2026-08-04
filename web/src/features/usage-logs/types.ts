@@ -178,6 +178,12 @@ export interface LogOtherData {
   model_price?: number
   group_ratio?: number
   user_group_ratio?: number
+  base_group_ratio?: number
+  user_level_id?: string
+  user_level_name?: string
+  user_level_ratio?: number
+  user_level_color?: string
+  user_level_exempt?: boolean
   cache_ratio?: number
   cache_creation_ratio?: number
   cache_creation_ratio_5m?: number

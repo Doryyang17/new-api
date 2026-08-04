@@ -23,6 +23,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AccountBalanceSummary } from '@/features/checkin'
+import { LevelBadge, type UserLevel } from '@/features/user-levels'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { getRoleLabel } from '@/lib/roles'
 
@@ -37,12 +38,18 @@ interface ProfileHeaderProps {
   profile: UserProfile | null
   loading: boolean
   checkinEnabled: boolean
+  userLevelEnabled: boolean
+  levelLoading: boolean
+  currentLevel?: UserLevel
 }
 
 export function ProfileHeader({
   profile,
   loading,
   checkinEnabled,
+  userLevelEnabled,
+  levelLoading,
+  currentLevel,
 }: ProfileHeaderProps) {
   const { t } = useTranslation()
 
@@ -99,7 +106,7 @@ export function ProfileHeader({
           </Avatar>
 
           <div className='min-w-0 flex-1 space-y-2 sm:space-y-3'>
-            <div className='flex min-w-0 items-center gap-2'>
+            <div className='flex min-w-0 flex-wrap items-center gap-2'>
               <h1 className='truncate text-xl font-semibold tracking-tight sm:text-2xl'>
                 {displayName}
               </h1>
@@ -108,6 +115,15 @@ export function ProfileHeader({
                 variant='neutral'
                 copyable={false}
               />
+              {userLevelEnabled && levelLoading && (
+                <Skeleton className='h-5 w-16 rounded-full' />
+              )}
+              {userLevelEnabled && currentLevel && (
+                <LevelBadge
+                  name={currentLevel.name}
+                  color={currentLevel.badge_color}
+                />
+              )}
               <StatusBadge
                 label={`${t('User ID')} ${profile.id}`}
                 variant='info'

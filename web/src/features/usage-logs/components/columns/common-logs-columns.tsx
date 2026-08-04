@@ -77,6 +77,14 @@ function formatRatioCompact(ratio: number | undefined): string {
 }
 
 function getGroupRatio(other: LogOtherData | null): number | null {
+  if (
+    other?.user_level_ratio != null &&
+    other.group_ratio != null &&
+    other.group_ratio !== 1 &&
+    Number.isFinite(other.group_ratio)
+  ) {
+    return other.group_ratio
+  }
   const userGroupRatio = other?.user_group_ratio
   if (
     userGroupRatio != null &&
@@ -263,21 +271,36 @@ function buildTypeDetailSegments(
         }
       }
     } else {
-      const userGroupRatio = other.user_group_ratio
-      const groupRatio = other.group_ratio
-      const isUserGroup =
-        userGroupRatio != null &&
-        Number.isFinite(userGroupRatio) &&
-        userGroupRatio !== -1
-      const effectiveRatio = isUserGroup ? userGroupRatio : groupRatio
-      const ratioLabel = isUserGroup
-        ? t('User Exclusive Ratio')
-        : t('Group Ratio')
-
-      if (effectiveRatio != null && Number.isFinite(effectiveRatio)) {
+      const hasUserLevel =
+        other.user_level_ratio != null &&
+        Number.isFinite(other.user_level_ratio) &&
+        other.group_ratio != null &&
+        Number.isFinite(other.group_ratio)
+      if (hasUserLevel) {
+        const baseRatio = other.base_group_ratio ?? other.user_group_ratio ?? 1
+        const levelName = other.user_level_name
+          ? `（${other.user_level_name}）`
+          : ''
         segments.push({
-          text: `${ratioLabel} ${formatRatioCompact(effectiveRatio)}x`,
+          text: `分组 ${formatRatioCompact(baseRatio)}x · 等级${levelName} ${formatRatioCompact(other.user_level_ratio)}x · 最终 ${formatRatioCompact(other.group_ratio)}x`,
         })
+      } else {
+        const userGroupRatio = other.user_group_ratio
+        const groupRatio = other.group_ratio
+        const isUserGroup =
+          userGroupRatio != null &&
+          Number.isFinite(userGroupRatio) &&
+          userGroupRatio !== -1
+        const effectiveRatio = isUserGroup ? userGroupRatio : groupRatio
+        const ratioLabel = isUserGroup
+          ? t('User Exclusive Ratio')
+          : t('Group Ratio')
+
+        if (effectiveRatio != null && Number.isFinite(effectiveRatio)) {
+          segments.push({
+            text: `${ratioLabel} ${formatRatioCompact(effectiveRatio)}x`,
+          })
+        }
       }
     }
   }

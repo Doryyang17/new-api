@@ -263,8 +263,7 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		Quota:       priceData.Quota,
 	}
 	if mjResp.StatusCode == http.StatusOK && midjResponse.Code == 1 {
-		midjourneyTask.BillingStatus = model.MidjourneyBillingStatusPending
-		midjourneyTask.BillingPendingAt = time.Now().UnixMilli()
+		midjourneyTask.MarkBillingPending(time.Now().UnixMilli())
 	}
 	err = midjourneyTask.Insert()
 	if err != nil {
@@ -619,8 +618,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		midjourneyTask.Status = "SUCCESS"
 	}
 	if consumeQuota && midjResponseWithStatus.StatusCode == http.StatusOK {
-		midjourneyTask.BillingStatus = model.MidjourneyBillingStatusPending
-		midjourneyTask.BillingPendingAt = time.Now().UnixMilli()
+		midjourneyTask.MarkBillingPending(time.Now().UnixMilli())
 	}
 	err = midjourneyTask.Insert()
 	if err != nil {

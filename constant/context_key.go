@@ -50,6 +50,7 @@ const (
 	ContextKeyUserStatus  ContextKey = "user_status"
 	ContextKeyUserEmail   ContextKey = "user_email"
 	ContextKeyUserGroup   ContextKey = "user_group"
+	ContextKeyUserLevel   ContextKey = "user_level"
 	ContextKeyUsingGroup  ContextKey = "group"
 	ContextKeyUserName    ContextKey = "username"
 

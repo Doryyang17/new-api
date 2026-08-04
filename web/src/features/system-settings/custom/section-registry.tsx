@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
+import { UserLevelSettingsSection } from '../billing/user-level-settings-section'
 import { AnnouncementsSection } from '../content/announcements-section'
 import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { AvailabilitySection } from '../maintenance/availability-section'
@@ -33,6 +34,11 @@ const CUSTOM_SECTIONS = [
     id: 'quota-grants',
     titleKey: 'Quota Grants',
     build: () => <QuotaGrantSection />,
+  },
+  {
+    id: 'user-levels',
+    titleKey: '用户等级',
+    build: () => <UserLevelSettingsSection />,
   },
   {
     id: 'registration-codes',

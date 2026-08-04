@@ -264,14 +264,40 @@ function BillingBreakdown(props: {
     }
   }
 
-  const userGR = other.user_group_ratio
-  const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
-  const effectiveGR = isUserGR ? userGR : other.group_ratio
-  if (effectiveGR != null && Number.isFinite(effectiveGR)) {
+  const hasUserLevel =
+    other.user_level_ratio != null &&
+    Number.isFinite(other.user_level_ratio) &&
+    other.group_ratio != null &&
+    Number.isFinite(other.group_ratio)
+  if (hasUserLevel) {
+    const baseGroupRatio =
+      other.base_group_ratio ?? other.user_group_ratio ?? other.group_ratio
     rows.push({
-      label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
-      value: `${formatRatio(effectiveGR)}x`,
+      label: '分组倍率',
+      value: `${formatRatio(baseGroupRatio)}x`,
     })
+    rows.push({
+      label: other.user_level_name
+        ? `等级倍率（${other.user_level_name}）`
+        : '等级倍率',
+      value: other.user_level_exempt
+        ? `${formatRatio(other.user_level_ratio)}x（本项不适用）`
+        : `${formatRatio(other.user_level_ratio)}x`,
+    })
+    rows.push({
+      label: '最终倍率',
+      value: `${formatRatio(other.group_ratio)}x`,
+    })
+  } else {
+    const userGR = other.user_group_ratio
+    const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
+    const effectiveGR = isUserGR ? userGR : other.group_ratio
+    if (effectiveGR != null && Number.isFinite(effectiveGR)) {
+      rows.push({
+        label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
+        value: `${formatRatio(effectiveGR)}x`,
+      })
+    }
   }
 
   if (!isTieredExpr && isClaude && hasAnyCacheTokens(other)) {
@@ -912,6 +938,23 @@ function DetailsDialogContent(props: DetailsDialogContentProps) {
               value={formatLogQuota(other.fee_quota ?? props.log.quota)}
               mono
             />
+            {other.user_level_exempt && (
+              <>
+                <DetailRow
+                  label='分组倍率'
+                  value={`${formatRatio(other.group_ratio)}x`}
+                  mono
+                />
+                <DetailRow
+                  label={
+                    other.user_level_name
+                      ? `等级优惠（${other.user_level_name}）`
+                      : '等级优惠'
+                  }
+                  value={`${formatRatio(other.user_level_ratio)}x（违规附加费不适用）`}
+                />
+              </>
+            )}
           </DetailSection>
         )}
 

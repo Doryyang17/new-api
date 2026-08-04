@@ -140,6 +140,10 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/checkin", controller.GetCheckinStatus)
 				selfRoute.POST("/checkin", middleware.TurnstileCheck(), controller.DoCheckin)
 
+				// User level routes
+				selfRoute.GET("/level", middleware.DisableCache(), controller.GetUserLevelStatus)
+				selfRoute.POST("/level/claim", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.ClaimUserLevel)
+
 				// Custom OAuth bindings
 				selfRoute.GET("/oauth/bindings", controller.GetUserOAuthBindings)
 				selfRoute.DELETE("/oauth/bindings/:provider_id", controller.UnbindCustomOAuth)
@@ -221,6 +225,8 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/daily-usage-status", controller.GetDailyUsageStatus)
 			optionRoute.PUT("/", controller.UpdateOption)
 			optionRoute.PUT("/request-risk", controller.UpdateRequestRiskOptions)
+			optionRoute.GET("/user-level", controller.GetUserLevelConfig)
+			optionRoute.PUT("/user-level", controller.UpdateUserLevelConfig)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
 			optionRoute.DELETE("/channel_affinity_cache", controller.ClearChannelAffinityCache)

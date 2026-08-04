@@ -30,6 +30,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { LevelBadge } from '@/features/user-levels'
 import { formatQuota, formatTimestamp } from '@/lib/format'
 
 import {
@@ -174,12 +175,25 @@ export function useUsersColumns(): ColumnDef<User>[] {
     },
     {
       accessorKey: 'group',
-      header: t('Group'),
+      header: '分组 / 等级',
       cell: ({ row }) => {
         const group = row.getValue('group') as string
+        const user = row.original
         return (
-          <BadgeCell>
+          <BadgeCell className='flex-col items-start gap-1'>
             <GroupBadge group={group} />
+            {user.level_name && (
+              <LevelBadge
+                name={
+                  user.level_enabled
+                    ? user.level_name
+                    : `${user.level_name}（已停用）`
+                }
+                color={user.level_badge_color}
+                ratio={user.level_ratio}
+                showRatio={user.level_enabled}
+              />
+            )}
           </BadgeCell>
         )
       },

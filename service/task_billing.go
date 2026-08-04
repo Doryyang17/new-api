@@ -51,6 +51,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	if info.PriceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = info.PriceData.GroupRatioInfo.GroupSpecialRatio
 	}
+	appendUserLevelBillingInfo(info.PriceData.GroupRatioInfo, other)
 	if info.IsModelMapped {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = info.UpstreamModelName
@@ -175,6 +176,12 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			other["model_ratio"] = bc.ModelRatio
 		}
 		other["group_ratio"] = bc.GroupRatio
+		if bc.SnapshotVersion >= 1 && bc.UserLevelID != "" {
+			other["base_group_ratio"] = bc.BaseGroupRatio
+			other["user_level_id"] = bc.UserLevelID
+			other["user_level_name"] = bc.UserLevelName
+			other["user_level_ratio"] = bc.UserLevelRatio
+		}
 		if priceData := taskBillingContextPriceData(bc); priceData != nil {
 			for k, v := range priceData.OtherRatios() {
 				other[k] = v
@@ -287,6 +294,9 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	if !tokenHandled {
 		taskAdjustTokenQuota(ctx, task, -quota)
 	}
+	if _, err := model.ReconcileTaskLevelConsumedQuota(task.ID); err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("回退异步任务等级进度失败 task %s: %s", task.TaskID, err.Error()))
+	}
 
 	// 3. 记录日志
 	other := taskBillingOther(task)
@@ -370,7 +380,6 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	if err := task.UpdateQuota(); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算回写 quota 失败 task %s: %s", task.TaskID, err.Error()))
 	}
-
 	var logType int
 	var logQuota int
 	if quotaDelta > 0 {
@@ -413,33 +422,42 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 
 	modelName := taskModelName(task)
 
-	// 获取模型价格和倍率
-	modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
-	// 只有配置了倍率(非固定价格)时才按 token 重新计费
-	if !hasRatioSetting || modelRatio <= 0 {
-		return
-	}
-
-	// 获取用户和组的倍率信息
-	group := task.Group
-	if group == "" {
-		user, err := model.GetUserById(task.UserId, false)
-		if err == nil {
-			group = user.Group
+	var modelRatio float64
+	var finalGroupRatio float64
+	levelDescription := ""
+	billingContext := task.PrivateData.BillingContext
+	if billingContext != nil && billingContext.SnapshotVersion >= 1 {
+		modelRatio = billingContext.ModelRatio
+		finalGroupRatio = billingContext.GroupRatio
+		if billingContext.UserLevelID != "" {
+			levelDescription = fmt.Sprintf(", level=%s, levelRatio=%.4f", billingContext.UserLevelID, billingContext.UserLevelRatio)
+		}
+	} else {
+		// Legacy tasks did not freeze all billing inputs. Preserve their existing
+		// behavior while every new task uses the submission-time snapshot.
+		var hasRatioSetting bool
+		modelRatio, hasRatioSetting, _ = ratio_setting.GetModelRatio(modelName)
+		if !hasRatioSetting {
+			return
+		}
+		group := task.Group
+		if group == "" {
+			user, err := model.GetUserById(task.UserId, false)
+			if err == nil {
+				group = user.Group
+			}
+		}
+		if group == "" {
+			return
+		}
+		finalGroupRatio = ratio_setting.GetGroupRatio(group)
+		if userGroupRatio, ok := ratio_setting.GetGroupGroupRatio(group, group); ok {
+			finalGroupRatio = userGroupRatio
 		}
 	}
-	if group == "" {
+	// 只有配置了倍率（非固定价格）时才按 token 重新计费。
+	if modelRatio <= 0 {
 		return
-	}
-
-	groupRatio := ratio_setting.GetGroupRatio(group)
-	userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
-
-	var finalGroupRatio float64
-	if hasUserGroupRatio {
-		finalGroupRatio = userGroupRatio
-	} else {
-		finalGroupRatio = groupRatio
 	}
 
 	// 计算 OtherRatios 乘积（视频折扣、时长等）
@@ -451,6 +469,6 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio * otherMultiplier（饱和转换，防止溢出成负数）
 	actualQuota, clamp := common.QuotaFromFloatChecked(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
 
-	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
+	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.4f, otherMultiplier=%.4f%s", totalTokens, modelRatio, finalGroupRatio, otherMultiplier, levelDescription)
 	RecalculateTaskQuota(ctx, task, actualQuota, reason, clamp)
 }

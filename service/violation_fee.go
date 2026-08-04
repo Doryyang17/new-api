@@ -81,22 +81,21 @@ func shouldChargeViolationFee(err *types.NewAPIError) bool {
 	return HasCSAMViolationMarker(err)
 }
 
-func calcViolationFeeQuota(amount, groupRatio float64) int {
+func calcViolationFeeQuota(amount, groupRatio float64) (int, *common.QuotaClamp) {
 	if amount <= 0 {
-		return 0
+		return 0, nil
 	}
 	if groupRatio <= 0 {
-		return 0
+		return 0, nil
 	}
 	quota := decimal.NewFromFloat(amount).
 		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
-		Mul(decimal.NewFromFloat(groupRatio)).
-		Round(0).
-		IntPart()
-	if quota <= 0 {
-		return 0
+		Mul(decimal.NewFromFloat(groupRatio))
+	result, clamp := common.QuotaFromDecimalChecked(quota)
+	if result <= 0 {
+		return 0, clamp
 	}
-	return int(quota)
+	return result, clamp
 }
 
 // ChargeViolationFeeIfNeeded charges an additional fee after the normal flow finishes (including refund).
@@ -117,8 +116,13 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return false
 	}
 
-	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
-	feeQuota := calcViolationFeeQuota(settings.ViolationDeductionAmount, groupRatio)
+	groupRatioInfo := relayInfo.PriceData.GroupRatioInfo
+	groupRatio := groupRatioInfo.BaseGroupRatio
+	if !groupRatioInfo.HasUserLevel && groupRatio == 0 {
+		groupRatio = groupRatioInfo.GroupRatio
+	}
+	feeQuota, clamp := calcViolationFeeQuota(settings.ViolationDeductionAmount, groupRatio)
+	noteQuotaClamp(relayInfo, clamp)
 	if feeQuota <= 0 {
 		return false
 	}
@@ -128,6 +132,8 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return false
 	}
 
+	// Violation fees remain visible in usage statistics, but are deliberately
+	// excluded from user-level progress and its discounted billing path.
 	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, feeQuota)
 	model.UpdateChannelUsedQuota(relayInfo.ChannelId, feeQuota)
 
@@ -146,7 +152,14 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		"upstream_error_code":  fmt.Sprintf("%v", oai.Code),
 		"violation_fee_marker": CSAMViolationMarker,
 	}
+	if groupRatioInfo.HasUserLevel {
+		other["user_level_id"] = groupRatioInfo.UserLevelID
+		other["user_level_name"] = groupRatioInfo.UserLevelName
+		other["user_level_ratio"] = groupRatioInfo.UserLevelRatio
+		other["user_level_exempt"] = true
+	}
 	appendBillingInfo(relayInfo, other)
+	attachQuotaSaturation(ctx, relayInfo, other)
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:      relayInfo.ChannelId,

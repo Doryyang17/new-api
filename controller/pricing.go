@@ -2,9 +2,11 @@ package controller
 
 import (
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/setting/user_level_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,19 +40,28 @@ func GetPricing(c *gin.Context) {
 	userId, exists := c.Get("id")
 	usableGroup := map[string]string{}
 	groupRatio := map[string]float64{}
+	baseGroupRatio := map[string]float64{}
 	for s, f := range ratio_setting.GetGroupRatioCopy() {
 		groupRatio[s] = f
+		baseGroupRatio[s] = f
 	}
 	var group string
+	var levelKey string
 	if exists {
-		user, err := model.GetUserCache(userId.(int))
-		if err == nil {
-			group = user.Group
+		group = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+		levelKey = common.GetContextKeyString(c, constant.ContextKeyUserLevel)
+		if group == "" {
+			user, err := model.GetUserCache(userId.(int))
+			if err == nil {
+				group = user.Group
+				levelKey = user.LevelKey
+			}
+		}
+		if group != "" {
 			for g := range groupRatio {
-				ratio, ok := ratio_setting.GetGroupGroupRatio(group, g)
-				if ok {
-					groupRatio[g] = ratio
-				}
+				ratioInfo := service.ResolveUserGroupRatio(group, g, levelKey)
+				baseGroupRatio[g] = ratioInfo.BaseGroupRatio
+				groupRatio[g] = ratioInfo.GroupRatio
 			}
 		}
 	}
@@ -61,14 +72,23 @@ func GetPricing(c *gin.Context) {
 	for group := range ratio_setting.GetGroupRatioCopy() {
 		if _, ok := usableGroup[group]; !ok {
 			delete(groupRatio, group)
+			delete(baseGroupRatio, group)
 		}
 	}
+	level := user_level_setting.ResolveBillingLevel(levelKey)
 
 	c.JSON(200, gin.H{
-		"success":            true,
-		"data":               pricing,
-		"vendors":            model.GetVendors(),
-		"group_ratio":        groupRatio,
+		"success":          true,
+		"data":             pricing,
+		"vendors":          model.GetVendors(),
+		"group_ratio":      groupRatio,
+		"base_group_ratio": baseGroupRatio,
+		"user_level": gin.H{
+			"enabled": level.Enabled,
+			"id":      level.ID,
+			"name":    level.Name,
+			"ratio":   level.Ratio,
+		},
 		"usable_group":       usableGroup,
 		"supported_endpoint": model.GetSupportedEndpointMap(),
 		"auto_groups":        service.GetUserAutoGroup(group),

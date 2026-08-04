@@ -153,11 +153,9 @@ func main() {
 		return a
 	}
 
-	// Register the periodic channel test, upstream model update, and async task
-	// polling (Midjourney / Suno / video) jobs as scheduled system tasks
-	// (DB-lease dedup across masters + run history), then start the runner that
-	// schedules and executes them. Master-only execution and the UpdateTask
-	// switch are enforced inside the runner and each handler's Enabled().
+	// Register periodic maintenance as scheduled system tasks (DB-lease dedup
+	// across masters + run history), then start the runner. Upstream task polling
+	// respects UpdateTask; user-level progress recovery remains independent.
 	controller.RegisterScheduledSystemTasks()
 	service.StartSystemTaskRunner()
 

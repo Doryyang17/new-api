@@ -305,6 +305,10 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 			logger.LogWarn(ctx, fmt.Sprintf("Task %s CAS lost or no-op update, skip billing", task.TaskID))
 		} else if isFailure && prevStatus != model.TaskStatusFailure && task.Quota != 0 {
 			RefundTaskQuota(ctx, task, task.FailReason)
+		} else if task.Status == model.TaskStatusSuccess {
+			if _, reconcileErr := model.ReconcileTaskLevelConsumedQuota(task.ID); reconcileErr != nil {
+				logger.LogError(ctx, fmt.Sprintf("更新 Suno 任务等级进度失败 task %s: %v", task.TaskID, reconcileErr))
+			}
 		}
 	}
 	return nil
@@ -593,6 +597,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 
 	if shouldSettle {
 		settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
+		if _, err := model.ReconcileTaskLevelConsumedQuota(task.ID); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("更新异步任务等级进度失败 task %s: %v", task.TaskID, err))
+		}
 	}
 	if shouldRefund {
 		RefundTaskQuota(ctx, task, task.FailReason)
