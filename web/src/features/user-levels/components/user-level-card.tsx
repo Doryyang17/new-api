@@ -52,6 +52,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { formatQuotaWithCurrency, getCurrencyDisplay } from '@/lib/currency'
+import { cn } from '@/lib/utils'
 
 import { useClaimUserLevel } from '../hooks'
 import type { UserLevel, UserLevelClaimResult, UserLevelStatus } from '../types'
@@ -147,6 +148,21 @@ function levelStateLabel(level: UserLevel): string {
   }
 }
 
+function levelRowClassName(level: UserLevel): string {
+  switch (level.state) {
+    case 'current':
+      return 'border-primary/40 bg-primary/5 shadow-sm shadow-primary/10'
+    case 'claimable':
+      return 'border-chart-4/40 bg-chart-4/5 shadow-sm shadow-chart-4/10'
+    case 'passed':
+      return 'border-success/20 bg-success/5'
+    case 'archived':
+      return 'border-muted bg-muted/30 opacity-70'
+    default:
+      return 'border-border/70 bg-card'
+  }
+}
+
 export function UserLevelCard(props: UserLevelCardProps) {
   const claimMutation = useClaimUserLevel()
   const [rulesOpen, setRulesOpen] = useState(false)
@@ -217,19 +233,30 @@ export function UserLevelCard(props: UserLevelCardProps) {
           <DialogHeader>
             <DialogTitle>用户等级规则</DialogTitle>
             <DialogDescription>
-              等级进度只统计系统开始记录后的已结算消耗，不含违规附加费；达到条件后领取，所有
-              Key 自动使用等级倍率。
+              等级进度统计累计消耗；达到条件后需手动领取，等级倍率对所有API
+              KEY自动生效。
             </DialogDescription>
           </DialogHeader>
           <div className='flex max-h-[55vh] flex-col gap-2 overflow-y-auto'>
             {status.levels.map((level) => (
               <div
                 key={level.id}
-                className='flex items-center justify-between gap-3 rounded-lg border p-3'
+                className={cn(
+                  'flex items-center gap-3 rounded-lg border p-3 transition-colors duration-200',
+                  levelRowClassName(level)
+                )}
               >
                 <div className='flex min-w-0 flex-col gap-1'>
                   <div className='flex flex-wrap items-center gap-2'>
-                    <LevelBadge name={level.name} color={level.badge_color} />
+                    <LevelBadge
+                      name={level.name}
+                      color={level.badge_color}
+                      ratio={level.ratio}
+                      showRatio
+                      ceremonial={
+                        level.state === 'current' || level.state === 'claimable'
+                      }
+                    />
                     <span className='text-muted-foreground text-xs'>
                       {levelStateLabel(level)}
                     </span>
@@ -238,9 +265,6 @@ export function UserLevelCard(props: UserLevelCardProps) {
                     累计消耗 {formatQuotaWithCurrency(level.threshold_quota)}
                   </span>
                 </div>
-                <span className='font-mono text-sm font-medium tabular-nums'>
-                  ×{level.ratio.toFixed(2)}
-                </span>
               </div>
             ))}
           </div>
@@ -278,6 +302,9 @@ export function UserLevelCard(props: UserLevelCardProps) {
                 <LevelBadge
                   name={claimResult.status.current_level.name}
                   color={claimResult.status.current_level.badge_color}
+                  ratio={claimResult.status.current_level.ratio}
+                  showRatio
+                  ceremonial
                 />
                 <span className='text-muted-foreground text-xs'>
                   {claimResult.previous_level.name} ×
@@ -297,20 +324,23 @@ export function UserLevelCard(props: UserLevelCardProps) {
       </Dialog>
 
       <Card data-card-hover='false'>
-        <CardHeader>
+        <CardHeader className='gap-3'>
           <div className='flex items-start gap-3'>
             <IconBadge tone='neutral' size='lg'>
               <HugeiconsIcon icon={Award01Icon} strokeWidth={2} />
             </IconBadge>
             <div className='flex min-w-0 flex-col gap-1'>
               <CardTitle>用户等级</CardTitle>
-              <CardDescription>等级越高，实际使用倍率越优惠</CardDescription>
+              <CardDescription className='whitespace-nowrap'>
+                等级越高，实际使用倍率越优惠
+              </CardDescription>
             </div>
           </div>
-          <CardAction>
+          <CardAction className='col-start-1 row-span-1 row-start-2 max-w-full min-w-0 justify-self-start @2xl/card-header:col-start-2 @2xl/card-header:row-span-2 @2xl/card-header:row-start-1 @2xl/card-header:justify-self-end'>
             <LevelBadge
               name={`当前：${currentLevel.name}`}
               color={currentLevel.badge_color}
+              ceremonial
             />
           </CardAction>
         </CardHeader>

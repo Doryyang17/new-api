@@ -16,8 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Crown02Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
+
 import {
   StatusBadge,
+  textColorMap,
   type StatusBadgeProps,
   type StatusVariant,
 } from '@/components/status-badge'
@@ -44,6 +48,7 @@ type LevelBadgeProps = Omit<
   color?: string
   ratio?: number
   showRatio?: boolean
+  ceremonial?: boolean
 }
 
 function badgeVariant(color?: string): StatusVariant {
@@ -54,24 +59,64 @@ function badgeVariant(color?: string): StatusVariant {
 }
 
 export function LevelBadge(props: LevelBadgeProps) {
-  const { name, color, ratio, showRatio, ...badgeProps } = props
+  const { name, color, ratio, showRatio, ceremonial, ...badgeProps } = props
+  const variant = badgeVariant(color)
   const badge = (
     <StatusBadge
       {...badgeProps}
       label={name}
-      variant={badgeVariant(color)}
+      variant={variant}
       copyable={badgeProps.copyable ?? false}
-      className={cn('min-w-0 shrink overflow-hidden', badgeProps.className)}
+      className={cn(
+        'min-w-0 shrink overflow-hidden',
+        ceremonial && [
+          'bg-current/10 font-semibold tracking-wide ring-1 ring-current/25',
+          'motion-safe:transition-[filter,transform] motion-safe:duration-200',
+          'motion-safe:hover:-translate-y-0.5 motion-safe:hover:brightness-105',
+        ],
+        badgeProps.className
+      )}
     />
   )
-  if (!showRatio || ratio == null) return badge
+  if (!showRatio && !ceremonial) return badge
 
   return (
-    <span className='inline-flex max-w-full min-w-0 items-center gap-2 text-xs'>
+    <span
+      className={cn(
+        'inline-flex max-w-full min-w-0 items-center gap-2 text-xs',
+        ceremonial && [
+          'group/level-badge relative isolate rounded-full px-1 py-0.5',
+          textColorMap[variant],
+        ]
+      )}
+    >
+      {ceremonial && (
+        <span
+          className='pointer-events-none absolute -inset-1 rounded-full bg-current/10 opacity-70 blur-md transition-opacity duration-300 group-hover/level-badge:opacity-100 motion-reduce:transition-none'
+          aria-hidden='true'
+        />
+      )}
+      {ceremonial && (
+        <HugeiconsIcon
+          icon={Crown02Icon}
+          className='relative size-3.5 shrink-0'
+          strokeWidth={1.8}
+          aria-hidden='true'
+        />
+      )}
       {badge}
-      <span className='bg-info/10 text-info inline-flex h-5 shrink-0 items-center rounded-full px-1.5 font-mono text-xs leading-none font-medium tabular-nums'>
-        ×{ratio.toFixed(2)}
-      </span>
+      {showRatio && ratio != null && (
+        <span
+          className={cn(
+            'inline-flex h-5 shrink-0 items-center rounded-full px-1.5 font-mono text-xs leading-none font-medium tabular-nums',
+            ceremonial
+              ? 'bg-current/10 text-current ring-1 ring-current/20'
+              : 'bg-info/10 text-info'
+          )}
+        >
+          ×{ratio.toFixed(2)}
+        </span>
+      )}
     </span>
   )
 }

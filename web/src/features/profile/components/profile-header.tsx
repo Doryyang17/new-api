@@ -122,6 +122,7 @@ export function ProfileHeader({
                 <LevelBadge
                   name={currentLevel.name}
                   color={currentLevel.badge_color}
+                  ceremonial
                 />
               )}
               <StatusBadge
