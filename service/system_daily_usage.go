@@ -208,7 +208,7 @@ func baseSystemDailyUsageStatus(now time.Time, settings system_setting.DailyUsag
 			MaxUsage:       limit.MaxUsage,
 			RemainingUsage: limit.MaxUsage,
 			Enabled:        limit.Enabled,
-			Message:        fmt.Sprintf("模型 %s 当日使用量已达上限，请每天再来。", limit.ModelName),
+			Message:        fmt.Sprintf("模型 %s 当日使用量已达上限，请明日再来。", limit.ModelName),
 			Code:           system_setting.ModelDailyUsageLimitRejectCode,
 		})
 	}

@@ -46,6 +46,7 @@ func TestBuildSystemDailyUsageStatusEnforcesGlobalAndModelLayers(t *testing.T) {
 		modelLimit, blocked := status.ShouldBlockModel("GLM-5.2")
 		assert.True(t, blocked)
 		assert.Equal(t, int64(200), modelLimit.CurrentUsage)
+		assert.Equal(t, "模型 GLM-5.2 当日使用量已达上限，请明日再来。", modelLimit.Message)
 		_, blocked = status.ShouldBlockModel("GLM-5.1")
 		assert.False(t, blocked)
 		_, blocked = status.ShouldBlockModel("GPT-5")
