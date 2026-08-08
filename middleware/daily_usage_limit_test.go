@@ -80,7 +80,7 @@ func TestSystemModelDailyUsageLimitIsScopedToRequestedModel(t *testing.T) {
 	blockedContext, _ := gin.CreateTestContext(blockedRecorder)
 	blockedContext.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	require.True(t, CheckSystemModelDailyUsageLimit(blockedContext, "GLM-5.2"))
-	require.Equal(t, http.StatusTooManyRequests, blockedRecorder.Code)
+	require.Equal(t, http.StatusForbidden, blockedRecorder.Code)
 	require.Contains(t, blockedRecorder.Body.String(), "model_daily_usage_exceeded")
 
 	allowedRecorder := httptest.NewRecorder()
@@ -101,5 +101,14 @@ func TestSystemModelDailyUsageLimitIsScopedToRequestedModel(t *testing.T) {
 	globalContext, _ := gin.CreateTestContext(globalRecorder)
 	globalContext.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	require.True(t, CheckSystemModelDailyUsageLimit(globalContext, "GLM-5.1"))
+	require.Equal(t, http.StatusForbidden, globalRecorder.Code)
 	require.Contains(t, globalRecorder.Body.String(), "system_daily_usage_exceeded")
+
+	agentRecorder := httptest.NewRecorder()
+	agentContext, _ := gin.CreateTestContext(agentRecorder)
+	agentContext.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	require.True(t, CheckSystemModelDailyUsageLimit(agentContext, "GLM-5.1"))
+	require.Equal(t, http.StatusForbidden, agentRecorder.Code)
+	require.Contains(t, agentRecorder.Body.String(), "global limit exceeded")
+	require.Contains(t, agentRecorder.Body.String(), "system_daily_usage_exceeded")
 }

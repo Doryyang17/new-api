@@ -128,13 +128,14 @@ func recordDailyUsageLimitReject(c *gin.Context, violation dailyUsageLimitViolat
 		"daily_usage_limit_enabled":    violation.Enabled,
 		"daily_usage_limit_exceeded":   violation.Exceeded,
 		"daily_usage_limit_fail_error": violation.EvaluationError,
-		"status_code":                  http.StatusTooManyRequests,
+		"status_code":                  http.StatusForbidden,
 	}
 	model.RecordDailyUsageLimitRejectLog(c, violation.Message, other)
 }
 
 func writeDailyUsageLimitResponse(c *gin.Context, violation dailyUsageLimitViolation) {
 	c.Header("Cache-Control", "no-store")
+	path := c.Request.URL.Path
 	if violation.RetryAfterSeconds > 0 {
 		c.Header("Retry-After", strconv.Itoa(violation.RetryAfterSeconds))
 	}
@@ -142,16 +143,15 @@ func writeDailyUsageLimitResponse(c *gin.Context, violation dailyUsageLimitViola
 	if violation.Scope == "model" {
 		errorCode = types.ErrorCodeModelDailyUsageExceeded
 	}
-	path := c.Request.URL.Path
 	switch {
 	case strings.HasPrefix(path, "/api"):
-		c.JSON(http.StatusTooManyRequests, gin.H{
+		c.JSON(http.StatusForbidden, gin.H{
 			"success": false,
 			"message": violation.Message,
 			"code":    violation.Code,
 		})
 	case strings.HasPrefix(path, "/v1/messages"):
-		c.JSON(http.StatusTooManyRequests, gin.H{
+		c.JSON(http.StatusForbidden, gin.H{
 			"type": "error",
 			"error": types.ClaudeError{
 				Type:    violation.Code,
@@ -159,18 +159,18 @@ func writeDailyUsageLimitResponse(c *gin.Context, violation dailyUsageLimitViola
 			},
 		})
 	case isMidjourneyAvailabilityPath(path):
-		c.JSON(http.StatusTooManyRequests, gin.H{
+		c.JSON(http.StatusForbidden, gin.H{
 			"description": violation.Message,
 			"type":        "usage_limit",
 			"code":        violation.Code,
 		})
 	case strings.HasPrefix(path, "/suno") || strings.HasPrefix(path, "/kling/") || strings.HasPrefix(path, "/jimeng"):
-		c.JSON(http.StatusTooManyRequests, gin.H{
+		c.JSON(http.StatusForbidden, gin.H{
 			"code":    violation.Code,
 			"message": violation.Message,
 		})
 	default:
-		c.JSON(http.StatusTooManyRequests, gin.H{
+		c.JSON(http.StatusForbidden, gin.H{
 			"error": types.OpenAIError{
 				Message: violation.Message,
 				Type:    "usage_limit",

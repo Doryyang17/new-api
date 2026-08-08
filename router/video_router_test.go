@@ -68,7 +68,7 @@ func TestVideoContentProxyUsesDailyUsageLimitBeforeAuth(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/v1/videos/task-1/content", nil)
 	engine.ServeHTTP(recorder, request)
 
-	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Equal(t, http.StatusForbidden, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "system_daily_usage_exceeded")
 	require.Contains(t, recorder.Body.String(), message)
 }

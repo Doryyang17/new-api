@@ -76,6 +76,6 @@ func TestRelayTaskRemixChecksResolvedModelDailyUsageLimit(t *testing.T) {
 
 	RelayTask(ctx)
 
-	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Equal(t, http.StatusForbidden, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "model_daily_usage_exceeded")
 }
