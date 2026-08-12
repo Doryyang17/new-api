@@ -502,7 +502,7 @@ func ConsumeCheckinBonusFunding(params CheckinBonusImmediateChargeParams) (*Chec
 		syncCheckinBonusWalletQuotaCache(params.UserId, -result.OriginalConsumed)
 	}
 	if params.DeductToken && common.RedisEnabled {
-		if cacheErr := cacheDecrTokenQuota(params.TokenKey, int64(params.Amount)); cacheErr != nil {
+		if _, cacheErr := cacheApplyTokenQuotaDelta(params.TokenId, params.TokenKey, int64(-params.Amount)); cacheErr != nil {
 			common.SysLog("failed to sync token quota cache after immediate charge: " + cacheErr.Error())
 		}
 	}
@@ -1061,6 +1061,7 @@ func RefundCheckinBonusFundingUsage(requestId string, now time.Time) (bonusRefun
 	nowUnix := now.Unix()
 	userId := 0
 	walletSource := false
+	tokenId := 0
 	tokenKey := ""
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		var usage CheckinBonusUsage
@@ -1128,6 +1129,7 @@ func RefundCheckinBonusFundingUsage(requestId string, now time.Time) (bonusRefun
 			} else if loadErr != nil {
 				return loadErr
 			} else {
+				tokenId = token.Id
 				tokenKey = token.Key
 				if updateErr := tx.Model(&Token{}).Where("id = ?", usage.TokenId).Updates(map[string]interface{}{
 					"remain_quota":  gorm.Expr("remain_quota + ?", tokenRefunded),
@@ -1155,7 +1157,7 @@ func RefundCheckinBonusFundingUsage(requestId string, now time.Time) (bonusRefun
 		syncCheckinBonusWalletQuotaCache(userId, originalRefunded)
 	}
 	if err == nil && handled && tokenRefunded > 0 && common.RedisEnabled {
-		if cacheErr := cacheIncrTokenQuota(tokenKey, int64(tokenRefunded)); cacheErr != nil {
+		if _, cacheErr := cacheApplyTokenQuotaDelta(tokenId, tokenKey, int64(tokenRefunded)); cacheErr != nil {
 			common.SysLog("failed to sync token quota cache after check-in bonus refund: " + cacheErr.Error())
 		}
 	}

@@ -26,6 +26,7 @@ import (
 
 type noBytesBodyStorage struct {
 	*bytes.Reader
+	data        []byte
 	size        int64
 	bytesCalled bool
 }
@@ -45,6 +46,10 @@ func (s *noBytesBodyStorage) IsDisk() bool {
 
 func (s *noBytesBodyStorage) Close() error {
 	return nil
+}
+
+func (s *noBytesBodyStorage) NewReader() (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(s.data)), nil
 }
 
 type trackingBodyStorage struct {
@@ -75,6 +80,10 @@ func (s *trackingBodyStorage) IsDisk() bool {
 func (s *trackingBodyStorage) Close() error {
 	s.closed = true
 	return nil
+}
+
+func (s *trackingBodyStorage) NewReader() (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(s.data)), nil
 }
 
 func withPromptComplianceSettings(t *testing.T, enabled bool) {
@@ -200,8 +209,10 @@ func TestPromptComplianceCheckDoesNotMaterializeBodyStorage(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
+	bodyBytes := body.Bytes()
 	storage := &noBytesBodyStorage{
-		Reader: bytes.NewReader(body.Bytes()),
+		Reader: bytes.NewReader(bodyBytes),
+		data:   bodyBytes,
 		size:   int64(body.Len()),
 	}
 	router.Use(func(c *gin.Context) {

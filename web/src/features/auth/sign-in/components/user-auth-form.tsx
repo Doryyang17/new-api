@@ -192,12 +192,17 @@ export function UserAuthForm({
 
     if (!validateTurnstile()) return
 
+    const submittedTurnstileToken = turnstileToken
+    if (isTurnstileEnabled) {
+      resetTurnstile()
+    }
+
     setIsLoading(true)
     try {
       const res = await login({
         username: data.username,
         password: data.password,
-        turnstile: turnstileToken,
+        turnstile: submittedTurnstileToken,
       })
 
       if (res.success) {
@@ -215,11 +220,8 @@ export function UserAuthForm({
         }
         await handleLoginSuccess(res.data, redirectTo)
         toast.success(t('Welcome back!'))
-      } else {
-        resetTurnstile()
       }
     } catch (error: unknown) {
-      resetTurnstile()
       if (axios.isAxiosError(error)) return
       toast.error(error instanceof Error ? error.message : loginFailedMessage)
     } finally {

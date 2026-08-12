@@ -58,6 +58,10 @@ func (p *testOAuthProvider) GetProviderPrefix() string {
 	return "test_"
 }
 
+func (p *testOAuthProvider) ProviderUserIDColumn() string {
+	return "github_id"
+}
+
 func withOAuthRegistrationCodeRequired(t *testing.T) {
 	t.Helper()
 	oldRegisterEnabled := common.RegisterEnabled
