@@ -237,6 +237,9 @@ func validateOptionValue(key string, value string) error {
 	if key == user_level_setting.OptionKey {
 		return fmt.Errorf("用户等级配置必须使用专用更新流程")
 	}
+	if key == operation_setting.ChannelTestConcurrencyOptionKey {
+		return operation_setting.ValidateChannelTestConcurrency(value)
+	}
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
 	}

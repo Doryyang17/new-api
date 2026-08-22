@@ -409,6 +409,22 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 	return postConsumeQuota(relayInfo, quota, preConsumedQuota, sendEmail, 0)
 }
 
+type postConsumeQuotaResult struct {
+	FundingApplied bool
+	TokenApplied   bool
+}
+
+func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (postConsumeQuotaResult, error) {
+	result := postConsumeQuotaResult{}
+	err := postConsumeQuota(relayInfo, quota, preConsumedQuota, sendEmail, 0)
+	if err != nil {
+		return result, err
+	}
+	result.FundingApplied = true
+	result.TokenApplied = relayInfo != nil && !relayInfo.IsPlayground
+	return result, nil
+}
+
 func PostConsumeMidjourneyQuota(relayInfo *relaycommon.RelayInfo, quota int, sendEmail bool, taskId int) error {
 	if taskId <= 0 {
 		return errors.New("midjourney task id is missing")

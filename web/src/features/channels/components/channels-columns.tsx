@@ -56,7 +56,7 @@ import {
 import { formatTimestampToDate } from '@/lib/format'
 import { truncateText } from '@/lib/utils'
 
-import { getCodexUsage } from '../api'
+import { getCodexUsage, updateChannelBalance } from '../api'
 import { CHANNEL_STATUS_CONFIG, MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   formatRelativeTime,
@@ -73,7 +73,6 @@ import {
   parseChannelAvailabilitySchedule,
   handleUpdateChannelField,
   handleUpdateTagField,
-  handleUpdateChannelBalance,
   createChannelFieldUpdateScheduler,
   isTagAggregateRow,
   type TagRow,
@@ -445,8 +444,19 @@ function BalanceCell({ channel }: { channel: Channel }) {
       return
     }
 
-    await handleUpdateChannelBalance(channel.id, queryClient)
-    setIsUpdating(false)
+    try {
+      const response = await updateChannelBalance(channel.id)
+      if (response.success) {
+        queryClient.invalidateQueries({ queryKey: ['channels'] })
+        toast.success(t('Channel balance updated'))
+      } else {
+        toast.error(response.message || t('Failed to update balance'))
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('Failed to update balance'))
+    } finally {
+      setIsUpdating(false)
+    }
   }
   let remainingBadgeLabel = sensitiveVisible ? remainingDisplay : SENSITIVE_MASK
   if (sensitiveVisible && isUpdating) {

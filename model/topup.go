@@ -45,10 +45,34 @@ const (
 )
 
 var (
-	ErrPaymentMethodMismatch = errors.New("payment method mismatch")
-	ErrTopUpNotFound         = errors.New("topup not found")
-	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
+	ErrPaymentMethodMismatch   = errors.New("payment method mismatch")
+	ErrTopUpNotFound           = errors.New("topup not found")
+	ErrTopUpStatusInvalid      = errors.New("topup status invalid")
+	ErrInvalidTopUpQuota       = errors.New("invalid top-up quota")
+	ErrTopUpQuotaLimitExceeded = errors.New("top-up quota limit exceeded")
 )
+
+func topUpQuotaMaxCurrent(creditedQuota int) (int, error) {
+	if creditedQuota <= 0 || creditedQuota >= common.MaxQuota {
+		return 0, ErrInvalidTopUpQuota
+	}
+	return common.MaxQuota - 1 - creditedQuota, nil
+}
+
+func ValidateTopUpQuotaCapacity(userId int, creditedQuota int) error {
+	maxCurrentQuota, err := topUpQuotaMaxCurrent(creditedQuota)
+	if err != nil {
+		return err
+	}
+	var user User
+	if err := DB.Select("quota").Where("id = ?", userId).First(&user).Error; err != nil {
+		return err
+	}
+	if user.Quota > maxCurrentQuota {
+		return ErrTopUpQuotaLimitExceeded
+	}
+	return nil
+}
 
 func (topUp *TopUp) Insert() error {
 	var err error
@@ -155,14 +179,25 @@ func PrepareTopUpCreditedQuota(topUp *TopUp) error {
 }
 
 func increaseUserQuotaTx(tx *gorm.DB, userId int, quota int) error {
-	result := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", quota))
+	maxCurrentQuota, err := topUpQuotaMaxCurrent(quota)
+	if err != nil {
+		return err
+	}
+	result := tx.Model(&User{}).Where("id = ? AND quota <= ?", userId, maxCurrentQuota).Update("quota", gorm.Expr("quota + ?", quota))
 	if result.Error != nil {
 		return result.Error
 	}
-	if result.RowsAffected == 0 {
+	if result.RowsAffected == 1 {
+		return nil
+	}
+	var count int64
+	if err := tx.Model(&User{}).Where("id = ?", userId).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
 		return errors.New("充值用户不存在")
 	}
-	return nil
+	return ErrTopUpQuotaLimitExceeded
 }
 
 func backfillTopUpCreditedQuota(query *gorm.DB) (int64, error) {

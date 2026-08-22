@@ -32,6 +32,7 @@ type Midjourney struct {
 	TokenId              int    `json:"-"`
 	BillingStatus        string `json:"-" gorm:"type:varchar(20);index"`
 	BillingPendingAt     int64  `json:"-" gorm:"index"`
+	BillingChannelId     int    `json:"-" gorm:"default:0"`
 }
 
 const (
@@ -64,6 +65,17 @@ func FailPendingMidjourneyBilling(taskId int, reason string) (bool, error) {
 			"billing_pending_at": 0,
 		})
 	return result.RowsAffected > 0, result.Error
+}
+
+func (midjourney *Midjourney) UpdateBillingState() error {
+	return DB.Model(midjourney).Select("quota", "token_id", "billing_channel_id").Updates(midjourney).Error
+}
+
+func (midjourney *Midjourney) GetBillingChannelId() int {
+	if midjourney.BillingChannelId > 0 {
+		return midjourney.BillingChannelId
+	}
+	return midjourney.ChannelId
 }
 
 // TaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段

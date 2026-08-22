@@ -7,9 +7,20 @@
 - Fork 仓库：[Doryyang17/new-api](https://github.com/Doryyang17/new-api)
 - 上游仓库：[QuantumNous/new-api](https://github.com/QuantumNous/new-api)
 - 原始二开基线：`12fc0100`（`Bump Electron lockfile dependencies`，`v1.0.0-rc.15-22-g12fc0100`）
-- 最近上游同步目标：`ccd535ef`（`v1.0.0-rc.24-18-gccd535ef8`）
-- 本次同步前已保护 fork 提交：51 个
-- 本轮上游同步来源：`upstream/main @ ccd535ef`
+- 最近上游同步目标：`2d8e50bf`（`v1.0.0-rc.25-1-g2d8e50bf3`）
+- 本次同步前已保护 fork 提交：52 个
+- 本轮上游同步来源：`upstream/main @ 2d8e50bf`
+
+### 本轮上游更新摘要
+
+本轮从 `upstream/main` 合并 22 个提交，保留本 fork 的 52 个二开提交和中文单语策略。上游主要更新包括：
+
+- 修复异步任务退款时 `used_quota` 未同步减少，以及充值订单到账额度校验和钱包额度保护。
+- 修复 OpenAI Chat / Responses 的 `prompt_cache_key` 映射、Claude 空工具注入、Claude 参数无工具转换和阿里图片模型协议判断。
+- 增加网关渠道字段透传控制、渠道测试能力，并重构高级自定义渠道路由编辑器。
+- 对 OAuth 自定义绑定响应字段、前端模型选择同步和使用日志筛选器凭据自动填充进行修复或加固。
+- 前端响应流式文字淡入、Playground 编辑器和 Vitest 测试基础设施继续完善；Electron、DOMPurify、fast-uri、tar、js-yaml 等依赖同步升级。
+- 上游新增的多语言 locale 文件未恢复，继续遵循本 fork 仅维护 `zh.json` / `zh-CN.yaml` 的约束。
 
 ## 二开迭代记录
 
