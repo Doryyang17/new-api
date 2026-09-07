@@ -420,3 +420,34 @@ func TestUserCheckinKeepsLegacyBalanceRewardWhenBonusDisabled(t *testing.T) {
 	require.NoError(t, DB.Model(&CheckinBonus{}).Where("user_id = ?", user.Id).Count(&bonusCount).Error)
 	assert.Zero(t, bonusCount)
 }
+
+func TestDurableTaskReservationSurvivesOrphanRecovery(t *testing.T) {
+	truncateTables(t)
+	require.NoError(t, DB.AutoMigrate(&Task{}))
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	user := &User{Id: 109, Username: "durable-task", AffCode: "durable-task", Quota: 100, Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Create(user).Error)
+	bonus := seedCheckinBonus(t, user.Id, 30, now, nextLocalMidnight(now))
+	_, _, tracked, err := ReserveCheckinBonusWallet(user.Id, "durable-task-request", 80, now, "node-a", 1000, "process-old", 0, true)
+	require.NoError(t, err)
+	require.True(t, tracked)
+	task := &Task{TaskID: "task_durable_bonus", UserId: user.Id, Quota: 80, PrivateData: TaskPrivateData{BillingRequestId: "durable-task-request", CheckinBonusConsumed: 30}}
+	require.NoError(t, task.Insert())
+
+	recovered, err := RecoverOrphanedCheckinBonusUsages("process-current", now.Add(time.Minute), 30*time.Second, 100)
+	require.NoError(t, err)
+	assert.Zero(t, recovered)
+	require.NoError(t, DB.First(user, user.Id).Error)
+	assert.Equal(t, 50, user.Quota)
+	require.NoError(t, DB.First(bonus, bonus.Id).Error)
+	assert.Zero(t, bonus.RemainingAmount)
+
+	// A confirmed task failure still refunds the linked reservation once.
+	_, _, _, _, handled, err := RefundCheckinBonusFundingUsage("durable-task-request", now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.True(t, handled)
+	require.NoError(t, DB.First(user, user.Id).Error)
+	assert.Equal(t, 100, user.Quota)
+	require.NoError(t, DB.First(bonus, bonus.Id).Error)
+	assert.Equal(t, 30, bonus.RemainingAmount)
+}

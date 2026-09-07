@@ -81,6 +81,9 @@ func TestRefreshSystemDailyUsageSnapshotFromLogs(t *testing.T) {
 }
 
 func TestNormalizeUsageModelName(t *testing.T) {
+	assert.Equal(t, "gpt-test", NormalizeUsageModelName("gpt-test@reasoning:high"))
+	assert.True(t, UsageModelMatches("gpt-test", "gpt-test@reasoning:high"))
+	assert.False(t, UsageModelMatches("gpt-test", "gpt-other@reasoning:high"))
 	assert.Equal(t, "gpt-4-gizmo-*", NormalizeUsageModelName("gpt-4-gizmo-abc123"))
 	assert.Equal(t, "gpt-4o-gizmo-*", NormalizeUsageModelName("gpt-4o-gizmo-abc123"))
 	assert.Equal(t, "gpt-4", NormalizeUsageModelName("gpt-4"))

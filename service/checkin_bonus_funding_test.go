@@ -204,11 +204,11 @@ func TestSubscriptionBonusSettlementKeepsRelayAuditInSync(t *testing.T) {
 	assert.Equal(t, int64(-50), info.SubscriptionPostDelta)
 	assert.Equal(t, int64(70), info.SubscriptionAmountUsedAfterPreConsume)
 
-	other := map[string]interface{}{}
+	other := model.NewLogOther()
 	appendBillingInfo(info, other)
-	assert.Equal(t, int64(20), other["subscription_consumed"])
-	assert.Equal(t, int64(20), other["subscription_used"])
-	assert.Equal(t, int64(980), other["subscription_remain"])
+	assert.Equal(t, int64(20), other.Snapshot()["subscription_consumed"])
+	assert.Equal(t, int64(20), other.Snapshot()["subscription_used"])
+	assert.Equal(t, int64(980), other.Snapshot()["subscription_remain"])
 }
 
 func TestNewBillingSessionKeepsOriginalInsufficientQuotaRule(t *testing.T) {
@@ -473,12 +473,12 @@ func TestPostConsumeQuotaUsesBonusAndExposesAuditSplit(t *testing.T) {
 	assert.Equal(t, 30, info.CheckinBonusConsumed)
 	assert.Equal(t, 20, info.OriginalFundingConsumed)
 
-	other := map[string]interface{}{}
+	other := model.NewLogOther()
 	appendBillingInfo(info, other)
-	assert.Equal(t, 50, other["consume_total"])
-	assert.Equal(t, 30, other["checkin_bonus_deducted"])
-	assert.Equal(t, 20, other["original_funding_deducted"])
-	assert.Equal(t, 20, other["wallet_quota_deducted"])
+	assert.Equal(t, 50, other.Snapshot()["consume_total"])
+	assert.Equal(t, 30, other.Snapshot()["checkin_bonus_deducted"])
+	assert.Equal(t, 20, other.Snapshot()["original_funding_deducted"])
+	assert.Equal(t, 20, other.Snapshot()["wallet_quota_deducted"])
 }
 
 func TestBonusFundedRequestStillCountsFullUsageAndRankingStats(t *testing.T) {
@@ -492,7 +492,7 @@ func TestBonusFundedRequestStillCountsFullUsageAndRankingStats(t *testing.T) {
 
 	model.UpdateUserUsedQuotaAndRequestCount(userID, 50)
 	model.UpdateChannelUsedQuota(channelID, 50)
-	other := map[string]interface{}{}
+	other := model.NewLogOther()
 	appendBillingInfo(info, other)
 
 	originalDataExportEnabled := common.DataExportEnabled

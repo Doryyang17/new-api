@@ -212,7 +212,7 @@ func GrantUserQuotaBatch(c *gin.Context) {
 		FilterSummary:  filterSummary,
 		Filters:        filters,
 		Ip:             c.ClientIP(),
-		AdminInfo:      auditOperatorInfo(c),
+		AdminInfo:      map[string]interface{}{"admin_id": c.GetInt("id"), "admin_username": c.GetString("username"), "admin_role": c.GetInt("role"), "auth_method": auditAuthMethod(c)},
 	})
 	if err != nil {
 		uniqueTargetIds := make(map[int]struct{}, len(request.UserIds))

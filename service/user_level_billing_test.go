@@ -117,7 +117,7 @@ func TestGenerateMjOtherInfoUsesPerCallUserLevelSnapshot(t *testing.T) {
 		},
 	}
 
-	other := GenerateMjOtherInfo(relayInfo, priceData)
+	other := GenerateMjOtherInfo(relayInfo, priceData).Snapshot()
 
 	assert.Equal(t, 1.5, other["base_group_ratio"])
 	assert.Equal(t, "gold", other["user_level_id"])

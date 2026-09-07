@@ -32,35 +32,35 @@ type frontendAvailabilityStatus struct {
 	RetryAfterSeconds int    `json:"retry_after_seconds"`
 }
 
-func SetWebRouter(router *gin.Engine, assets WebAssets) {
+func SetWebRouter(router *gin.Engine, assets WebAssets, pluginDispatcher gin.HandlerFunc) {
 	frontendFS := common.EmbedFolder(assets.BuildFS, "web/dist")
 
-	router.Use(gzip.Gzip(gzip.DefaultCompression))
-	router.Use(middleware.GlobalWebRateLimit())
-	router.Use(middleware.Cache())
-	router.Use(static.Serve("/", frontendFS))
-	router.NoRoute(func(c *gin.Context) {
-		c.Set(middleware.RouteTagKey, "web")
-		availabilityStatus := system_setting.GetAvailabilityStatus()
-		if isAPINotFoundPath(c.Request.RequestURI) {
-			if isModelAPIPath(c.Request.RequestURI) && availabilityStatus.Unavailable {
-				middleware.HandleSystemAvailability(c)
+	router.NoRoute(
+		pluginDispatcher,
+		middleware.RouteTag("web"),
+		gzip.Gzip(gzip.DefaultCompression),
+		middleware.AccessTokenAudit(),
+		middleware.GlobalWebRateLimit(),
+		middleware.Cache(),
+		static.Serve("/", frontendFS),
+		func(c *gin.Context) {
+			availabilityStatus := system_setting.GetAvailabilityStatus()
+			if isAPINotFoundPath(c.Request.RequestURI) || strings.HasPrefix(c.Request.RequestURI, "/assets") {
+				if isModelAPIPath(c.Request.RequestURI) && availabilityStatus.Unavailable {
+					middleware.HandleSystemAvailability(c)
+					return
+				}
+				controller.RelayNotFound(c)
 				return
 			}
-			controller.RelayNotFound(c)
-			return
-		}
-		if strings.HasPrefix(c.Request.RequestURI, "/assets") {
-			controller.RelayNotFound(c)
-			return
-		}
-		if availabilityStatus.Unavailable {
-			c.Header("Cache-Control", "no-store")
-		} else {
-			c.Header("Cache-Control", "no-cache")
-		}
-		c.Data(http.StatusOK, "text/html; charset=utf-8", injectAvailabilityStatus(assets.IndexPage, availabilityStatus))
-	})
+			if availabilityStatus.Unavailable {
+				c.Header("Cache-Control", "no-store")
+			} else {
+				c.Header("Cache-Control", "no-cache")
+			}
+			c.Data(http.StatusOK, "text/html; charset=utf-8", injectAvailabilityStatus(assets.IndexPage, availabilityStatus))
+		},
+	)
 }
 
 func injectAvailabilityStatus(page []byte, status system_setting.AvailabilityStatus) []byte {

@@ -293,6 +293,16 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 						logger.LogError(ctx, "fail to mark midjourney billing refunded: "+statusErr.Error())
 					}
 				}
+				other := model.NewLogOther()
+				other.MergePublic(map[string]interface{}{
+					"task_id":                   task.MjId,
+					"reason":                    "构图失败",
+					"billing_source":            task.BillingSource,
+					"subscription_id":           task.SubscriptionId,
+					"consume_total":             task.Quota,
+					"checkin_bonus_deducted":    bonusRefund,
+					"original_funding_deducted": originalRefund,
+				})
 				model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 					UserId:    task.UserId,
 					LogType:   model.LogTypeRefund,
@@ -300,15 +310,7 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 					ChannelId: task.ChannelId,
 					ModelName: service.CovertMjpActionToModelName(task.Action),
 					Quota:     task.Quota,
-					Other: map[string]interface{}{
-						"task_id":                   task.MjId,
-						"reason":                    "构图失败",
-						"billing_source":            task.BillingSource,
-						"subscription_id":           task.SubscriptionId,
-						"consume_total":             task.Quota,
-						"checkin_bonus_deducted":    bonusRefund,
-						"original_funding_deducted": originalRefund,
-					},
+					Other:     other,
 				})
 			}
 		}

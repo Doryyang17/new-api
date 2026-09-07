@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,9 +40,9 @@ func TestShouldRecordRelayFailure(t *testing.T) {
 		Reasoning: []byte(`"invalid"`),
 	})
 	require.Error(t, reasoningConversionErr)
-	clientReasoningConversionError := types.NewError(reasoningConversionErr, types.ErrorCodeConvertRequestFailed)
+	clientReasoningConversionError := types.NewErrorWithStatusCode(reasoningConversionErr, types.ErrorCodeConvertRequestFailed, http.StatusBadRequest)
 	require.Equal(t, http.StatusBadRequest, clientReasoningConversionError.GetOriginalStatusCode())
-	require.Equal(t, types.ErrorCodeInvalidRequest, clientReasoningConversionError.GetErrorCode())
+	require.True(t, reasoning.IsClientError(clientReasoningConversionError))
 
 	_, contentConversionErr := relayconvert.ClaudeMessagesRequestToOpenAIChat(dto.ClaudeRequest{
 		Model:    "claude-test",
@@ -49,7 +50,7 @@ func TestShouldRecordRelayFailure(t *testing.T) {
 	}, nil)
 	require.Error(t, contentConversionErr)
 	clientContentConversionError := types.NewError(contentConversionErr, types.ErrorCodeConvertRequestFailed)
-	require.Equal(t, http.StatusBadRequest, clientContentConversionError.GetOriginalStatusCode())
+	require.Equal(t, http.StatusBadRequest, clientContentConversionError.GetOriginalStatusCode(), contentConversionErr.Error())
 	require.Equal(t, types.ErrorCodeInvalidRequest, clientContentConversionError.GetErrorCode())
 
 	testCases := []struct {

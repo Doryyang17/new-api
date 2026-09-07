@@ -26,13 +26,9 @@ import { useStatus } from '@/hooks/use-status'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CheckinCalendarCard } from './components/checkin-calendar-card'
-import { LoginSessionsCard } from './components/login-sessions-card'
-import { PasskeyCard } from './components/passkey-card'
 import { ProfileHeader } from './components/profile-header'
-import { ProfileSecurityCard } from './components/profile-security-card'
 import { ProfileSettingsCard } from './components/profile-settings-card'
 import { SidebarModulesCard } from './components/sidebar-modules-card'
-import { TwoFACard } from './components/two-fa-card'
 import { useProfile } from './hooks'
 
 export function Profile() {
@@ -78,8 +74,6 @@ export function Profile() {
                   loading={loading}
                   onProfileUpdate={refreshProfile}
                 />
-                <ProfileSecurityCard profile={profile} loading={loading} />
-                <LoginSessionsCard />
               </div>
 
               <div className='contents xl:sticky xl:top-6 xl:order-2 xl:block xl:space-y-6 xl:self-start'>
@@ -104,11 +98,7 @@ export function Profile() {
                     />
                   </div>
                 )}
-                <div className='order-4 space-y-4 sm:space-y-6'>
-                  {canConfigureSidebar && <SidebarModulesCard />}
-                  <PasskeyCard loading={loading} />
-                  <TwoFACard loading={loading} />
-                </div>
+                {canConfigureSidebar && <SidebarModulesCard />}
               </div>
             </div>
           </CardStaggerItem>

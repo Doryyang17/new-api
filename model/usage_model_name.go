@@ -1,9 +1,13 @@
 package model
 
-import "strings"
+import (
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
+	"strings"
+)
 
 // NormalizeUsageModelName returns the model identity persisted by usage logs.
 func NormalizeUsageModelName(modelName string) string {
+	modelName = reasoning.ParseModelModifiers(modelName).Base
 	if strings.HasPrefix(modelName, "gpt-4-gizmo") {
 		return "gpt-4-gizmo-*"
 	}

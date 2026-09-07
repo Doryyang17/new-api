@@ -45,6 +45,7 @@ func (CheckinBonus) TableName() string { return "checkin_bonuses" }
 type CheckinBonusUsage struct {
 	Id                     int64  `json:"id" gorm:"primaryKey;autoIncrement"`
 	RequestId              string `json:"request_id" gorm:"type:varchar(191);not null;uniqueIndex"`
+	DurableTaskId          string `json:"durable_task_id,omitempty" gorm:"type:varchar(191);index"`
 	UserId                 int    `json:"user_id" gorm:"not null;index"`
 	BonusId                int64  `json:"bonus_id" gorm:"not null;index"`
 	ReservedAmount         int    `json:"reserved_amount" gorm:"not null"`
@@ -1188,7 +1189,7 @@ func RecoverOrphanedCheckinBonusUsages(currentInstanceId string, now time.Time, 
 		CheckinBonusUsageStatusReserved,
 		currentInstanceId,
 		cutoff,
-	).Order("id ASC").Limit(batchSize).Find(&usages).Error; err != nil {
+	).Where("durable_task_id IS NULL OR durable_task_id = ?", "").Order("id ASC").Limit(batchSize).Find(&usages).Error; err != nil {
 		return 0, err
 	}
 	if len(usages) == 0 {

@@ -141,7 +141,8 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 	tokenName := ctx.GetString("token_name")
 	oai := apiErr.ToOpenAIError()
 
-	other := map[string]any{
+	other := model.NewLogOther()
+	other.MergePublic(map[string]interface{}{
 		"violation_fee":        true,
 		"violation_fee_code":   string(types.ErrorCodeViolationFeeGrokCSAM),
 		"fee_quota":            feeQuota,
@@ -151,12 +152,12 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		"upstream_error_type":  oai.Type,
 		"upstream_error_code":  fmt.Sprintf("%v", oai.Code),
 		"violation_fee_marker": CSAMViolationMarker,
-	}
+	})
 	if groupRatioInfo.HasUserLevel {
-		other["user_level_id"] = groupRatioInfo.UserLevelID
-		other["user_level_name"] = groupRatioInfo.UserLevelName
-		other["user_level_ratio"] = groupRatioInfo.UserLevelRatio
-		other["user_level_exempt"] = true
+		other.SetPublic("user_level_id", groupRatioInfo.UserLevelID)
+		other.SetPublic("user_level_name", groupRatioInfo.UserLevelName)
+		other.SetPublic("user_level_ratio", groupRatioInfo.UserLevelRatio)
+		other.SetPublic("user_level_exempt", true)
 	}
 	appendBillingInfo(relayInfo, other)
 	attachQuotaSaturation(ctx, relayInfo, other)

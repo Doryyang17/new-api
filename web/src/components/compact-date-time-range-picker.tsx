@@ -166,6 +166,7 @@ export function CompactDateTimeRangePicker(
               </div>
               <Input
                 type='datetime-local'
+                aria-label={t('Start Time')}
                 value={draftStart}
                 disabled={props.disabled}
                 onChange={(e) => setDraftStart(e.target.value)}
@@ -181,6 +182,7 @@ export function CompactDateTimeRangePicker(
               </div>
               <Input
                 type='datetime-local'
+                aria-label={t('End Time')}
                 value={draftEnd}
                 disabled={props.disabled}
                 onChange={(e) => setDraftEnd(e.target.value)}

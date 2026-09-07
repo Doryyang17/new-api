@@ -21,7 +21,7 @@ func isModelGenerationRequest(c *gin.Context) bool {
 	if path == "/suno/fetch" || strings.Contains(path, "/mj/task/list-by-condition") {
 		return false
 	}
-	if strings.HasPrefix(path, "/jimeng") && c.Query("Action") == jimengGetResultAction {
+	if strings.HasPrefix(path, "/jimeng") && c.Query("Action") == "CVSync2AsyncGetResult" {
 		return false
 	}
 	return true

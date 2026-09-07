@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	appI18n "github.com/QuantumNous/new-api/i18n"
+	builtinplugins "github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -340,7 +341,7 @@ func TestRequestProtectionObserveModeDoesNotBlock(t *testing.T) {
 	assert.Equal(t, 4, handled)
 }
 
-func newJimengRequestRiskTestEngine(userID int, tokenID int, handled *int) *gin.Engine {
+func newJimengRequestRiskTestEngine(t *testing.T, userID int, tokenID int, handled *int) *gin.Engine {
 	engine := gin.New()
 	engine.Use(BodyStorageCleanup())
 	engine.Use(func(c *gin.Context) {
@@ -349,7 +350,11 @@ func newJimengRequestRiskTestEngine(userID int, tokenID int, handled *int) *gin.
 		c.Set("group", "default")
 		c.Next()
 	})
-	engine.Use(JimengRequestConvert())
+	source, err := builtinplugins.Source("jimeng")
+	require.NoError(t, err)
+	plugin := compileTaskRoutePlugin(t, string(source))
+	plugin.Meta.Models = []string{"jimeng-test", "jimeng-a", "jimeng-b", "jimeng-c", "jimeng-d"}
+	engine.Use(pinTaskPluginRoute(plugin, 0), PrepareTaskPluginRoute())
 	engine.POST("/jimeng/", func(c *gin.Context) {
 		if rejection := ApplyRequestProtection(c); rejection != nil {
 			WriteRequestProtectionResponse(c, rejection)
@@ -369,7 +374,7 @@ func TestJimengValidationFailureRunsBeforeRequestProtection(t *testing.T) {
 	t.Cleanup(func() { common.RedisEnabled = oldRedisEnabled })
 
 	handled := 0
-	engine := newJimengRequestRiskTestEngine(51006, 52006, &handled)
+	engine := newJimengRequestRiskTestEngine(t, 51006, 52006, &handled)
 	body := `{"req_key":"jimeng-test","prompt":"ping"}`
 	firstRequest := httptest.NewRequest(http.MethodPost, "/jimeng/", strings.NewReader(body))
 	firstRequest.Header.Set("Content-Type", "application/json")
@@ -393,7 +398,7 @@ func TestRequestProtectionTracksJimengReqKeyModelSweep(t *testing.T) {
 	t.Cleanup(func() { common.RedisEnabled = oldRedisEnabled })
 
 	handled := 0
-	engine := newJimengRequestRiskTestEngine(51007, 52007, &handled)
+	engine := newJimengRequestRiskTestEngine(t, 51007, 52007, &handled)
 	var response *httptest.ResponseRecorder
 	for _, model := range []string{"jimeng-a", "jimeng-b", "jimeng-c", "jimeng-d"} {
 		body := `{"req_key":"` + model + `","prompt":"hi"}`

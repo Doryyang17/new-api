@@ -347,15 +347,14 @@ func TestGrantUserQuotaBatchRecordsStructuredFailureAudit(t *testing.T) {
 	GrantUserQuotaBatch(context)
 	assert.Contains(t, recorder.Body.String(), `"success":false`)
 
-	var auditLog model.Log
-	require.NoError(t, db.Where("user_id = ? AND type = ?", 9999, model.LogTypeManage).First(&auditLog).Error)
-	other, err := common.StrToMap(auditLog.Other)
+	var auditLog model.AuditLog
+	require.NoError(t, db.Where("user_id = ? AND action = ?", 9999, "user.quota_grant_batch").First(&auditLog).Error)
+	require.NotNil(t, auditLog.Other.Op)
+	assert.Equal(t, "user.quota_grant_batch", auditLog.Other.Op.Action)
+	encodedParams, err := common.Marshal(auditLog.Other.Op.Params)
 	require.NoError(t, err)
-	op, ok := other["op"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "user.quota_grant_batch", op["action"])
-	params, ok := op["params"].(map[string]interface{})
-	require.True(t, ok)
+	var params map[string]any
+	require.NoError(t, common.Unmarshal(encodedParams, &params))
 	assert.Equal(t, requestId, params["request_id"])
 	assert.Equal(t, "1.00", params["amount_usd"])
 	assert.Equal(t, "failed", params["result"])

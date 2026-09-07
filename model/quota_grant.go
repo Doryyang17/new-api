@@ -370,7 +370,7 @@ func GrantUserQuotaBatch(params QuotaGrantBatchParams) (*QuotaGrantBatchResult, 
 			"reason":     params.Reason,
 		}
 		userOther := map[string]interface{}{
-			"op": buildOpField("user.quota_grant", userParams),
+			"op": &AuditOperation{Action: "user.quota_grant", Params: userParams},
 		}
 		if len(params.AdminInfo) > 0 {
 			userOther["admin_info"] = params.AdminInfo
@@ -397,7 +397,7 @@ func GrantUserQuotaBatch(params QuotaGrantBatchParams) (*QuotaGrantBatchResult, 
 			"result":     "success",
 		}
 		operatorOther := map[string]interface{}{
-			"op":         buildOpField("user.quota_grant_batch", operatorParams),
+			"op":         &AuditOperation{Action: "user.quota_grant_batch", Params: operatorParams},
 			"admin_info": params.AdminInfo,
 		}
 		logs = append(logs, &Log{

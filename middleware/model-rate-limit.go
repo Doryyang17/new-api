@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -103,7 +104,7 @@ func redisRateLimitHandler(durationSeconds int64, durationMinutes int, totalMaxC
 			allowed, err = tb.Allow(
 				ctx,
 				totalKey,
-				limiter.WithCapacity(int64(totalMaxCount)*durationSeconds),
+				limiter.WithCapacity(rateLimitCapacity(totalMaxCount, durationSeconds)),
 				limiter.WithRate(int64(totalMaxCount)),
 				limiter.WithRequested(durationSeconds),
 			)
@@ -178,12 +179,9 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 			return
 		}
 
-		// 计算限流参数，兼容历史数据库中的非法零值。
-		durationMinutes := setting.ModelRequestRateLimitDurationMinutes
-		if durationMinutes < 1 {
-			durationMinutes = 1
-		}
-		duration := int64(durationMinutes * 60)
+		// 计算限流参数
+		durationMinutes := max(setting.ModelRequestRateLimitDurationMinutes, 1)
+		duration := rateLimitDurationSeconds(durationMinutes)
 		totalMaxCount := setting.ModelRequestRateLimitCount
 		successMaxCount := setting.ModelRequestRateLimitSuccessCount
 
@@ -207,4 +205,26 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 			memoryRateLimitHandler(duration, totalMaxCount, successMaxCount)(c)
 		}
 	}
+}
+
+func rateLimitDurationSeconds(durationMinutes int) int64 {
+	if durationMinutes <= 0 {
+		return 0
+	}
+	minutes := int64(durationMinutes)
+	if minutes > math.MaxInt64/60 {
+		return math.MaxInt64
+	}
+	return minutes * 60
+}
+
+func rateLimitCapacity(count int, durationSeconds int64) int64 {
+	if count <= 0 || durationSeconds <= 0 {
+		return 0
+	}
+	c := int64(count)
+	if c > math.MaxInt64/durationSeconds {
+		return math.MaxInt64
+	}
+	return c * durationSeconds
 }

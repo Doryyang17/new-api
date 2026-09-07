@@ -171,7 +171,7 @@ func setupOAuthRegistrationControllerTestDB(t *testing.T) {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.RegistrationCode{}, &model.Log{}, &model.UserOAuthBinding{}, &model.UserSession{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.RegistrationCode{}, &model.Log{}, &model.UserOAuthBinding{}, &model.UserSession{}, &model.TwoFA{}, &model.PasskeyCredential{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()

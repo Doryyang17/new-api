@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
@@ -86,6 +87,9 @@ func ShouldRecordRelayFailure(err *types.NewAPIError) bool {
 	}
 	if types.IsChannelError(err) {
 		return true
+	}
+	if reasoning.IsClientError(err) {
+		return false
 	}
 	if err.GetOriginalStatusCode() >= http.StatusInternalServerError {
 		return true
