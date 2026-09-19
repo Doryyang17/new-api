@@ -84,10 +84,11 @@ func newOAuthRegistrationCodeTestContext() *gin.Context {
 func TestFindOrCreateOAuthUserRequiresRegistrationCodeForNewUser(t *testing.T) {
 	withOAuthRegistrationCodeRequired(t)
 
-	user, err := findOrCreateOAuthUser(
+	user, _, err := findOrCreateOAuthUser(
 		newOAuthRegistrationCodeTestContext(),
 		&testOAuthProvider{},
 		&oauth.OAuthUser{ProviderUserID: "new-user", Username: "new_user"},
+		nil,
 		"",
 	)
 
@@ -99,10 +100,11 @@ func TestFindOrCreateOAuthUserRequiresRegistrationCodeForNewUser(t *testing.T) {
 func TestFindOrCreateOAuthUserAllowsExistingUserWithoutRegistrationCode(t *testing.T) {
 	withOAuthRegistrationCodeRequired(t)
 
-	user, err := findOrCreateOAuthUser(
+	user, _, err := findOrCreateOAuthUser(
 		newOAuthRegistrationCodeTestContext(),
 		&testOAuthProvider{taken: true},
 		&oauth.OAuthUser{ProviderUserID: "existing-user", Username: "existing"},
+		nil,
 		"",
 	)
 

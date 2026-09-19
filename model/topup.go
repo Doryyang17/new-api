@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 
 	"github.com/QuantumNous/new-api/common"
@@ -84,16 +85,14 @@ func (topUp *TopUp) Insert() error {
 // creditTopUpQuota atomically enforces the wallet ceiling while adding quota.
 // Keeping the predicate and increment in one UPDATE prevents two
 // concurrent callbacks from both passing a separate read/check.
-func creditTopUpQuota(tx *gorm.DB, userId int, creditedQuota int, updates map[string]interface{}) error {
+func creditTopUpQuota(tx *gorm.DB, userId int, creditedQuota int, updates map[string]any) error {
 	maxCurrentQuota, err := topUpQuotaMaxCurrent(creditedQuota)
 	if err != nil {
 		return err
 	}
 
-	updateFields := make(map[string]interface{}, len(updates)+1)
-	for key, value := range updates {
-		updateFields[key] = value
-	}
+	updateFields := make(map[string]any, len(updates)+1)
+	maps.Copy(updateFields, updates)
 	updateFields["quota"] = gorm.Expr("quota + ?", creditedQuota)
 
 	result := tx.Model(&User{}).
@@ -192,9 +191,9 @@ func calculateTopUpCreditedQuota(topUp *TopUp) (int, error) {
 
 	// Balance top-ups historically truncated fractional quota toward zero.
 	// Preserve that contract while keeping the centralized saturation check.
-	quota, clamp := common.QuotaFromDecimalChecked(quotaValue.Truncate(0))
-	if clamp != nil {
-		return 0, clamp
+	quota, err := common.WalletQuotaFromDecimalStrict(quotaValue.Truncate(0))
+	if err != nil {
+		return 0, err
 	}
 	if quota <= 0 {
 		return 0, errors.New("无效的充值额度")

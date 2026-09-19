@@ -65,7 +65,7 @@ func TestUserUpdateDoesNotOverwriteConcurrentAccountingOrTokenChanges(t *testing
 	staleUser, err := GetUserById(user.Id, true)
 	require.NoError(t, err)
 
-	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]any{
 		"quota":         gorm.Expr("quota - ?", 400),
 		"used_quota":    gorm.Expr("used_quota + ?", 400),
 		"level_key":     "gold",
@@ -162,7 +162,7 @@ func TestUpdateUserAccessTokenOnlyUpdatesAccessToken(t *testing.T) {
 	}
 	require.NoError(t, DB.Create(&user).Error)
 
-	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]any{
 		"quota":        gorm.Expr("quota + ?", 500),
 		"aff_quota":    gorm.Expr("aff_quota - ?", 500),
 		"display_name": "concurrent-update",
@@ -214,7 +214,7 @@ func TestUpdateUserSettingOnlyUpdatesSetting(t *testing.T) {
 	}
 	require.NoError(t, DB.Create(&user).Error)
 
-	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]any{
 		"quota":         gorm.Expr("quota - ?", 250),
 		"used_quota":    gorm.Expr("used_quota + ?", 250),
 		"request_count": gorm.Expr("request_count + ?", 1),
@@ -295,7 +295,7 @@ func TestUpdateUserBindColumnOnlyTouchesTheBindingColumn(t *testing.T) {
 	truncateTables(t)
 
 	user := createUserBindTestUser(t)
-	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]any{
 		"role":   common.RoleAdminUser,
 		"status": common.UserStatusEnabled,
 		"group":  "vip",

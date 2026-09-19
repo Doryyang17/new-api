@@ -140,7 +140,7 @@ func userCheckinWithTransaction(checkin *Checkin, bonus *CheckinBonus, userId in
 }
 
 // GetUserCheckinStats 获取用户签到统计信息
-func GetUserCheckinStats(userId int, month string) (map[string]interface{}, error) {
+func GetUserCheckinStats(userId int, month string) (map[string]any, error) {
 	// 获取指定月份的所有签到记录
 	startDate := month + "-01"
 	endDate := month + "-31"

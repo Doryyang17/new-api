@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/gin-gonic/gin"
@@ -134,10 +135,24 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.settled || s.refunded || s.trusted || targetQuota <= s.preConsumedQuota {
+	imageRequest := false
+	if s.relayInfo != nil {
+		_, imageRequest = s.relayInfo.Request.(*dto.ImageRequest)
+		imageRequest = imageRequest || s.relayInfo.ImageRequestCount > 0
+	}
+	if s.settled || s.refunded || s.trusted && !imageRequest || targetQuota <= s.preConsumedQuota {
 		return nil
 	}
 
+	if imageRequest {
+		funding := s.funding
+		if bonus, ok := funding.(*CheckinBonusFunding); ok {
+			funding = bonus.base
+		}
+		if wallet, ok := funding.(*WalletFunding); ok {
+			wallet.requireSufficientReserve = true
+		}
+	}
 	delta := targetQuota - s.preConsumedQuota
 	if delta <= 0 {
 		return nil
@@ -160,6 +175,9 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 
 	s.preConsumedQuota += delta
 	s.tokenConsumed += delta
+	if imageRequest {
+		s.trusted = false
+	}
 	s.syncRelayInfo()
 	return nil
 }
@@ -228,7 +246,7 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 
 func (s *BillingSession) reserveFunding(delta int) error {
 	if err := s.funding.Reserve(delta); err != nil {
-		if s.funding.Source() == BillingSourceSubscription {
+		if s.funding.Source() == BillingSourceSubscription || errors.Is(err, ErrInsufficientWalletQuota) || strings.Contains(err.Error(), "insufficient user quota") {
 			return types.NewErrorWithStatusCode(
 				fmt.Errorf("订阅额度不足或未配置订阅: %s", err.Error()),
 				types.ErrorCodeInsufficientUserQuota,
@@ -336,6 +354,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		return nil, types.NewError(fmt.Errorf("relayInfo is nil"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
+	_, isImageRequest := relayInfo.Request.(*dto.ImageRequest)
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)
 	withCheckinBonus := func(base FundingSource) FundingSource {
 		tokenId := relayInfo.TokenId
@@ -376,7 +395,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 
 		session := &BillingSession{
 			relayInfo: relayInfo,
-			funding:   withCheckinBonus(&WalletFunding{userId: relayInfo.UserId}),
+			funding:   withCheckinBonus(&WalletFunding{userId: relayInfo.UserId, requireSufficientReserve: relayInfo.ImageRequestCount > 0 || isImageRequest}),
 		}
 		if apiErr := session.preConsume(c, preConsumedQuota); apiErr != nil {
 			return nil, apiErr

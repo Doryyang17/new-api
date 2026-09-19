@@ -56,7 +56,7 @@ func TestPrepareTopUpCreditedQuotaRejectsOverflowBeforePayment(t *testing.T) {
 		{
 			name: "epay",
 			topUp: &TopUp{
-				Amount:          int64(common.MaxQuota/500_000 + 1),
+				Amount:          int64(common.MaxWalletQuota/500_000 + 1),
 				PaymentMethod:   "alipay",
 				PaymentProvider: PaymentProviderEpay,
 			},
@@ -64,7 +64,7 @@ func TestPrepareTopUpCreditedQuotaRejectsOverflowBeforePayment(t *testing.T) {
 		{
 			name: "stripe",
 			topUp: &TopUp{
-				Money:           float64(common.MaxQuota/500_000 + 1),
+				Money:           float64(common.MaxWalletQuota/500_000 + 1),
 				PaymentMethod:   PaymentMethodStripe,
 				PaymentProvider: PaymentProviderStripe,
 			},
@@ -72,7 +72,7 @@ func TestPrepareTopUpCreditedQuotaRejectsOverflowBeforePayment(t *testing.T) {
 		{
 			name: "creem",
 			topUp: &TopUp{
-				Amount:          int64(common.MaxQuota) + 1,
+				Amount:          int64(common.MaxWalletQuota) + 1,
 				PaymentMethod:   PaymentMethodCreem,
 				PaymentProvider: PaymentProviderCreem,
 			},
@@ -90,12 +90,16 @@ func TestPrepareTopUpCreditedQuotaRejectsOverflowBeforePayment(t *testing.T) {
 	}
 
 	safeTopUp := &TopUp{
-		Amount:          int64(common.MaxQuota / 500_000),
+		Amount:          int64(common.MaxWalletQuota / 500_000),
 		PaymentMethod:   "alipay",
 		PaymentProvider: PaymentProviderEpay,
 	}
 	require.NoError(t, PrepareTopUpCreditedQuota(safeTopUp))
-	assert.EqualValues(t, 2_147_000_000, safeTopUp.CreditedQuota)
+	assert.EqualValues(t, (common.MaxWalletQuota/500_000)*500_000, safeTopUp.CreditedQuota)
+	assert.Greater(t, safeTopUp.CreditedQuota, int64(common.MaxQuota))
+	boundaryTopUp := &TopUp{Amount: common.MaxWalletQuota, PaymentProvider: PaymentProviderCreem}
+	require.NoError(t, PrepareTopUpCreditedQuota(boundaryTopUp))
+	assert.EqualValues(t, common.MaxWalletQuota, boundaryTopUp.CreditedQuota)
 }
 
 func TestPrepareTopUpCreditedQuotaPreservesDecimalTruncation(t *testing.T) {

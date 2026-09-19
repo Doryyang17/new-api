@@ -41,8 +41,9 @@ type FundingSource interface {
 var ErrInsufficientWalletQuota = errors.New("wallet quota insufficient")
 
 type WalletFunding struct {
-	userId   int
-	consumed int // 实际预扣的用户额度
+	requireSufficientReserve bool
+	userId                   int
+	consumed                 int // 实际预扣的用户额度
 }
 
 func (w *WalletFunding) Source() string { return BillingSourceWallet }
@@ -94,6 +95,9 @@ func (w *WalletFunding) Refund() error {
 }
 
 func (w *WalletFunding) Reserve(amount int) error {
+	if w.requireSufficientReserve {
+		return w.PreConsume(amount)
+	}
 	if amount <= 0 {
 		return nil
 	}
@@ -709,7 +713,7 @@ func refundWithRetry(fn func() error) error {
 	}
 	const maxAttempts = 3
 	var lastErr error
-	for i := 0; i < maxAttempts; i++ {
+	for i := range maxAttempts {
 		if err := fn(); err == nil {
 			return nil
 		} else {

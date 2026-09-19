@@ -31,6 +31,7 @@ export const AUTO_GROUP_FRAME_CLASS_NAME =
 
 type AutoGroupFlowBorderProps = {
   shouldReduceMotion: boolean
+  appearance?: 'default' | 'subtle'
 }
 
 export function AutoGroupFlowBorder(props: AutoGroupFlowBorderProps) {
@@ -40,7 +41,10 @@ export function AutoGroupFlowBorder(props: AutoGroupFlowBorderProps) {
     <span
       aria-hidden='true'
       data-auto-group-flow-border='true'
-      className='auto-group-flow-border pointer-events-none absolute -inset-px'
+      className={cn(
+        'auto-group-flow-border pointer-events-none absolute -inset-px',
+        props.appearance === 'subtle' && 'auto-group-flow-border-subtle'
+      )}
     />
   )
 }
@@ -129,7 +133,7 @@ export function GroupRatioBadge(props: GroupRatioBadgeProps) {
   )
 }
 
-export function AutoGroupBadge(props: AutoGroupFlowBorderProps) {
+export function AutoGroupBadge(props: { shouldReduceMotion: boolean }) {
   return (
     <AutoGroupFrame
       effect='badge'

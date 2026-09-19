@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/limiter"
 	"github.com/QuantumNous/new-api/constant"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
@@ -117,6 +118,7 @@ func redisRateLimitHandler(durationSeconds int64, durationMinutes int, totalMaxC
 
 			if !allowed {
 				abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到总请求数限制：%d分钟内最多请求%d次，包括失败次数，请检查您的请求是否正确", durationMinutes, totalMaxCount))
+				return
 			}
 		}
 
@@ -124,7 +126,7 @@ func redisRateLimitHandler(durationSeconds int64, durationMinutes int, totalMaxC
 		c.Next()
 
 		// 5. 如果请求成功，记录成功请求
-		if c.Writer.Status() < 400 {
+		if modelRequestSucceeded(c) {
 			recordRedisRequest(ctx, rdb, successKey, successMaxCount, durationSeconds)
 		}
 	}
@@ -146,24 +148,27 @@ func memoryRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) 
 			return
 		}
 
-		// 2. 原子预留成功请求槽位；失败请求结束后回滚。
-		successReservation, allowed := inMemoryRateLimiter.Reserve(successKey, successMaxCount, duration)
-		if !allowed {
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
-			return
+		var reservation *common.RateLimitReservation
+		if successMaxCount > 0 {
+			reservation = inMemoryRateLimiter.Reserve(successKey, successMaxCount, duration)
+			if reservation == nil {
+				c.AbortWithStatus(http.StatusTooManyRequests)
+				return
+			}
+			defer reservation.Complete(false)
 		}
 
 		// 3. 处理请求
-		requestCompleted := false
-		defer func() {
-			if !requestCompleted || c.Writer.Status() >= http.StatusBadRequest {
-				inMemoryRateLimiter.Rollback(successKey, successReservation)
-			}
-		}()
 		c.Next()
-		requestCompleted = true
+
+		// 4. 如果请求成功，记录到实际的成功请求计数中
+		reservation.Complete(modelRequestSucceeded(c))
 	}
+}
+
+func modelRequestSucceeded(c *gin.Context) bool {
+	status, _ := common.GetContextKeyType[*relaycommon.StreamStatus](c, constant.ContextKeyResponseStreamStatus)
+	return c.Writer.Status() < 400 && !status.ResponseFailed()
 }
 
 // ModelRequestRateLimit 模型请求限流中间件

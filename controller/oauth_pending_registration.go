@@ -251,5 +251,5 @@ func CompleteOAuthRegistration(c *gin.Context) {
 	}
 
 	deleteOAuthPendingRegistration(pending.Ticket)
-	setupLogin(user, c)
+	setupLogin(user, nil, c)
 }

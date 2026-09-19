@@ -50,6 +50,7 @@ import {
 } from '@/features/checkin'
 import { formatQuotaWithCurrency } from '@/lib/currency'
 import dayjs from '@/lib/dayjs'
+import { handleServerError } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
 
 interface CheckinCalendarCardProps {
@@ -162,10 +163,10 @@ export function CheckinCalendarCard({
           if (token && shouldTriggerTurnstile(res.message)) {
             setTurnstileWidgetKey((v) => v + 1)
           }
-          toast.error(res.message || t('Check-in failed'))
+          handleServerError(res, t('Check-in failed'))
         }
-      } catch {
-        toast.error(t('Check-in failed'))
+      } catch (error) {
+        handleServerError(error, t('Check-in failed'))
       } finally {
         setCheckinLoading(false)
       }

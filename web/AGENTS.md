@@ -61,6 +61,13 @@
 - **兼容旧代码**：现有 `useTranslation()` / `t()` 调用可以继续保留，作为旧页面的中文兼容层；不要为了新增功能再补 en/fr/ru/ja/vi locale。
 - **常量文案**：成功、错误、状态、选项等常量可直接使用中文展示文案，调用处按现有组件模式渲染即可；不再登记 `static-keys` 或运行 i18n 同步。
 
+**数字格式化与 Intl 语言参数（强制）**
+
+- 普通数字、紧凑数字展示必须优先复用 `@/lib/format` 的 `formatNumber` / `formatCompactNumber`；金额、余额与额度使用已有 `@/lib/currency` 或对应业务封装，保留精度、单位与换算语义。已有封装无法表达的格式选项才可直接使用 `Intl.NumberFormat`，不能为统一调用方式改变数值显示精度。
+- 本 fork 只使用中文界面；需要显式语言参数时使用合法 BCP 47 标签 `zh-CN`，不得向 `Intl.*` 传入 `zhCN` / `zhTW`。无需恢复已删除的语言映射模块、语言切换或多语言测试。
+- `bun run lint` / `bun run lint:fix` 保留 **`project/intl-locale` error** 检查非法语言参数；不得通过 lint-disable 绕过。跨函数或跨模块传递的语言参数也须使用合法标签。
+- 修改数字格式化时，回归测试应验证中文展示、原有精度与换算语义；外部遗留语言状态不得改变本 fork 的中文展示策略。修改 lint 规则时验证非法参数报错且合法固定标签通过，类型检查和构建不能替代这些验证。
+
 ### 3.2 代码风格与类型
 
 - **表达式**：禁止 2 层及以上嵌套三元表达式；改用 `if-else`、提前返回或抽取函数。单层三元可保留，但需简洁。
@@ -83,14 +90,14 @@
 
 以下为常用检索入口，不能把本表当作完整组件清单：
 
-| 场景 | 优先检查的项目入口 |
-| --- | --- |
-| 通用弹窗布局 | `@/components/dialog` |
-| 删除、危险操作及普通确认 | `@/components/confirm-dialog` |
-| 复制按钮与剪贴板交互 | `@/components/copy-button`、`@/hooks/use-copy-to-clipboard` |
-| 空状态、加载状态、错误状态 | `@/components/empty-state`、`@/components/loading-state`、`@/components/error-state` |
-| 表格、分页、工具栏及列表布局 | `@/components/data-table`，先读该目录的 `README.md` 和公开导出 |
-| 按钮、输入、选择、提示等基础控件 | `@/components/ui/`，以 `components.json` 和本地实现为准 |
+| 场景                             | 优先检查的项目入口                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| 通用弹窗布局                     | `@/components/dialog`                                                                |
+| 删除、危险操作及普通确认         | `@/components/confirm-dialog`                                                        |
+| 复制按钮与剪贴板交互             | `@/components/copy-button`、`@/hooks/use-copy-to-clipboard`                          |
+| 空状态、加载状态、错误状态       | `@/components/empty-state`、`@/components/loading-state`、`@/components/error-state` |
+| 表格、分页、工具栏及列表布局     | `@/components/data-table`，先读该目录的 `README.md` 和公开导出                       |
+| 按钮、输入、选择、提示等基础控件 | `@/components/ui/`，以 `components.json` 和本地实现为准                              |
 
 - 使用函数式组件与 Hooks，单一职责；组件 props 须有明确类型（接口或类型别名）。
 - **Props 使用**：组件 props 非必要不要解构，直接使用 `props.xxx` 访问属性，保持代码清晰（详见 [3.2 代码风格与类型](#32-代码风格与类型)）。
@@ -112,7 +119,7 @@
 ### 3.6 API 请求
 
 - **React Query**：数据获取用 `useQuery`，变更用 `useMutation`；为每个查询配置唯一 `queryKey`（建议数组形式、层级一致）；在 `onSuccess` 中对相关 query 做 `invalidateQueries`，可配合乐观更新。服务端错误统一通过 `handleServerError` 处理（详见 [3.9 错误处理](#39-错误处理)）。
-- **Axios**：使用项目统一的 `api` 实例（含 `baseURL`、`headers`、`withCredentials: true`）；GET 默认请求去重，特殊请求可通过配置关闭；认证与通用错误在拦截器中处理。
+- **Axios**：使用项目统一的 `api` 实例（含 `baseURL`、`headers`、`withCredentials: true`）；GET 默认请求去重，特殊请求可通过配置关闭；认证刷新与请求重试在拦截器中处理；普通错误提示由 Query/Mutation 的最终失败回调或直接调用方负责。
 
 ### 3.7 表单
 
@@ -127,7 +134,10 @@
 
 ### 3.9 错误处理
 
-- **服务端错误**：统一使用 `handleServerError`，在 React Query 全局配置与拦截器中接入；按 HTTP 状态码给出合适中文提示。
+- **服务端错误**：统一使用 `handleServerError(error, fallbackMessage?)`，优先保留服务端具体原因。相同失败沿 `cause` 传播时只提示一次；不同操作即使文案相同也分别提示。禁止把完整 Axios 错误对象（可能包含凭据）直接写入控制台。
+- **提示归属**：普通请求拦截器不弹 Toast。使用共享 `createAppQueryClient` 在 Query/Mutation 最终失败时提示；Mutation 自定义 `onError` 负责自己的提示或表单错误。自动重试期间和主动取消时不报错。`meta.errorToast: false` 关闭自动提示，页面仍可主动调用错误处理函数。
+- **业务失败**：保留原始 API 响应契约；Query 使用 `requireServerSuccess` 检查 `success: false`，或在业务层用 `createServerError(response, fallbackMessage?)` 抛错并保留来源。直接请求须明确处理失败响应和 Promise 拒绝；需要展示失败状态的 Mutation 不得把失败结果当作保存成功。
+- **认证兼容**：保留稳定错误码映射及 `AuthOperationError` 的安全消息，不解开其来源来展示被屏蔽的细节。维护既有刷新、跳转和一次性授权不重放约束。
 - **展示**：使用 `toast.error` 等统一方式；路由级错误由 `errorComponent` 承接，提供友好错误页并记录便于排查的信息。
 - **表单**：校验与服务端错误映射到字段后，在字段下方展示；使用 `form.setError` 等与表单库一致的方式。
 

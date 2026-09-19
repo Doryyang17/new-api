@@ -85,6 +85,8 @@ export function CompactDateTimeRangePicker(
     return `${startText} ~ ${endText}`
   }, [props.end, props.start, props.timeZone, t])
 
+  const mobileLabel = label
+
   const handleOpenChange = (nextOpen: boolean) => {
     if (props.disabled && nextOpen) return
     if (nextOpen) {
@@ -143,6 +145,7 @@ export function CompactDateTimeRangePicker(
             type='button'
             variant='outline'
             disabled={props.disabled}
+            aria-label={label}
             className={cn(
               'w-full justify-start gap-2 px-2.5 text-sm leading-5 font-normal tabular-nums',
               !props.start && !props.end && 'text-muted-foreground',
@@ -152,7 +155,10 @@ export function CompactDateTimeRangePicker(
         }
       >
         <CalendarDays className='text-muted-foreground size-4 shrink-0' />
-        <span className='truncate'>{label}</span>
+        <span className='hidden truncate sm:block'>{label}</span>
+        <span className='min-w-0 [overflow-wrap:anywhere] whitespace-normal sm:hidden'>
+          {mobileLabel}
+        </span>
       </PopoverTrigger>
       <PopoverContent
         align='start'
@@ -240,7 +246,7 @@ export function CompactDateTimeRangePicker(
               className='h-7 flex-1 px-2 text-xs'
               onClick={() => applyPreset('month')}
             >
-              {t('This month')}
+              {t('Current month')}
             </Button>
           </div>
 

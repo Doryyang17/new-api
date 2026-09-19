@@ -6,17 +6,21 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInMemoryRateLimiterReservationCanRollback(t *testing.T) {
 	limiter := InMemoryRateLimiter{}
 	limiter.Init(0)
 
-	reservation, allowed := limiter.Reserve("user:1", 1, 60)
-	assert.True(t, allowed)
-	assert.False(t, limiter.Request("user:1", 1, 60))
-	assert.True(t, limiter.Rollback("user:1", reservation))
-	assert.True(t, limiter.Request("user:1", 1, 60))
+	reservation := limiter.Reserve("user:1", 1, 60)
+	require.NotNil(t, reservation)
+	assert.Nil(t, limiter.Reserve("user:1", 1, 60))
+	reservation.Complete(false)
+	next := limiter.Reserve("user:1", 1, 60)
+	require.NotNil(t, next)
+	next.Complete(true)
+	assert.Nil(t, limiter.Reserve("user:1", 1, 60))
 }
 
 func TestInMemoryRateLimiterConcurrentReservationsRespectLimit(t *testing.T) {
@@ -31,7 +35,7 @@ func TestInMemoryRateLimiterConcurrentReservationsRespectLimit(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			<-start
-			if _, allowed := limiter.Reserve("user:2", 1, 60); allowed {
+			if reservation := limiter.Reserve("user:2", 1, 60); reservation != nil {
 				atomic.AddInt32(&allowedCount, 1)
 			}
 		}()

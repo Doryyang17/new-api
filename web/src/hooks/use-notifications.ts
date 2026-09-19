@@ -28,6 +28,7 @@ import {
 import type { Announcement } from '@/features/announcements/types'
 import { useStatus } from '@/hooks/use-status'
 import { getNotice } from '@/lib/api'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 import { useNotificationStore } from '@/stores/notification-store'
 
@@ -50,8 +51,8 @@ export function useNotifications() {
     refetch: refetchNoticeQuery,
   } = useQuery({
     queryKey: ['notice'],
-    queryFn: getNotice,
-    staleTime: 1000 * 60 * 5,
+    queryFn: async () => requireServerSuccess(await getNotice()),
+    staleTime: 1000 * 60 * 5, // 5 minutes
   })
   const { status, loading: statusLoading } = useStatus()
   const isAuthenticated = useAuthStore((state) => Boolean(state.auth.user))

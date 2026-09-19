@@ -19,11 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { Loader2 } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { Label } from '@/components/ui/label'
 import { formatQuota, formatCompactNumber } from '@/lib/format'
+import { handleServerError } from '@/lib/handle-server-error'
 
 import { getUserInfo } from '../../api'
 import type { UserInfo } from '../../types'
@@ -65,13 +65,11 @@ export function UserInfoDialog(props: UserInfoDialogProps) {
         if (result.success) {
           setUserInfo(result.data || null)
         } else {
-          toast.error(result.message || t('Failed to fetch user information'))
+          handleServerError(result, t('Failed to fetch user information'))
         }
       } catch (error) {
         if (sequence !== requestSequence.current) return
-        // eslint-disable-next-line no-console
-        console.error('Failed to fetch user info:', error)
-        toast.error(t('Failed to fetch user information'))
+        handleServerError(error, t('Failed to fetch user information'))
       } finally {
         if (sequence === requestSequence.current) {
           setIsLoading(false)
