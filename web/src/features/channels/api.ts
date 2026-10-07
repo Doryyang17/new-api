@@ -75,6 +75,7 @@ export type TaskPluginOption = {
   baseUrl?: string
   models: string[]
   channelTypes?: number[] | null
+  upstreams?: string[] | null
 }
 
 export async function getTaskPluginOptions(): Promise<TaskPluginOption[]> {

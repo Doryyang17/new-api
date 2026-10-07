@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -97,12 +99,12 @@ func ValidatePreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *
 		relayInfo.UserQuota = userQuota
 
 		effectiveQuota := preConsumedQuota
-		trustQuota := common.GetTrustQuota()
+		trustQuota := operation_setting.GetQuotaSetting().TrustQuotaUSD * common.QuotaPerUnit
 		tokenTrusted := relayInfo.TokenUnlimited
 		if !tokenTrusted && c != nil {
-			tokenTrusted = c.GetInt("token_quota") > trustQuota
+			tokenTrusted = float64(c.GetInt("token_quota")) > trustQuota
 		}
-		if !relayInfo.ForcePreConsume && trustQuota > 0 && tokenTrusted && userQuota > trustQuota {
+		if !relayInfo.ForcePreConsume && trustQuota > 0 && !math.IsNaN(trustQuota) && !math.IsInf(trustQuota, 0) && tokenTrusted && float64(userQuota) > trustQuota {
 			effectiveQuota = 0
 		}
 		return validateTokenQuotaAvailable(c, relayInfo, effectiveQuota)

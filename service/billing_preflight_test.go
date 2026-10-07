@@ -1,19 +1,66 @@
 package service
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPreflightTrustQuotaMatchesBillingPolicy(t *testing.T) {
+	previousTrust, previousUnit := operation_setting.GetQuotaSetting().TrustQuotaUSD, common.QuotaPerUnit
+	common.QuotaPerUnit = 100
+	t.Cleanup(func() {
+		operation_setting.GetQuotaSetting().TrustQuotaUSD, common.QuotaPerUnit = previousTrust, previousUnit
+	})
+	for _, tc := range []struct {
+		name    string
+		trust   float64
+		force   bool
+		allowed bool
+	}{
+		{name: "custom threshold", trust: 0.1, allowed: true},
+		{name: "fractional quota threshold", trust: 0.005, allowed: true},
+		{name: "equal token quota is not trusted", trust: 0.2},
+		{name: "zero disables trust", trust: 0},
+		{name: "invalid negative", trust: -1},
+		{name: "invalid nan", trust: math.NaN()},
+		{name: "invalid infinity", trust: math.Inf(1)},
+		{name: "async forces preconsume", trust: 0.1, force: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			truncate(t)
+			operation_setting.GetQuotaSetting().TrustQuotaUSD = tc.trust
+			seedUser(t, 609, 100)
+			seedToken(t, 609, 609, "preflight-trust", 20)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Set("token_quota", 20)
+			info := &relaycommon.RelayInfo{UserId: 609, TokenId: 609, TokenKey: "preflight-trust", ForcePreConsume: tc.force, UserSetting: dto.UserSetting{BillingPreference: "wallet_only"}}
+			apiErr := ValidatePreConsumeBilling(ctx, 50, info)
+			if tc.allowed {
+				require.Nil(t, apiErr)
+			} else {
+				require.NotNil(t, apiErr)
+				assert.Equal(t, types.ErrorCodePreConsumeTokenQuotaFailed, apiErr.GetErrorCode())
+			}
+			assert.Equal(t, 100, walletQuota(t, 609))
+			token, err := model.GetTokenById(609)
+			require.NoError(t, err)
+			assert.Equal(t, 20, token.RemainQuota)
+		})
+	}
+}
 
 func TestValidatePreConsumeBillingDoesNotMutateWalletOrToken(t *testing.T) {
 	truncate(t)

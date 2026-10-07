@@ -12,6 +12,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -425,7 +426,12 @@ func TestCheckinBonusFundingDoesNotSwitchToLateBonusAfterBasePreConsume(t *testi
 func TestTrustedBillingSessionSettlesBonusAndWalletInTrackedLedger(t *testing.T) {
 	truncate(t)
 	const userId = 545
-	trustQuota := common.GetTrustQuota()
+	previousTrust, previousUnit := operation_setting.GetQuotaSetting().TrustQuotaUSD, common.QuotaPerUnit
+	operation_setting.GetQuotaSetting().TrustQuotaUSD, common.QuotaPerUnit = 10, 500000
+	t.Cleanup(func() {
+		operation_setting.GetQuotaSetting().TrustQuotaUSD, common.QuotaPerUnit = previousTrust, previousUnit
+	})
+	const trustQuota = 5000000
 	seedUser(t, userId, trustQuota+100)
 	bonus := seedFundingBonus(t, userId, 30, time.Now().Add(time.Hour))
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())

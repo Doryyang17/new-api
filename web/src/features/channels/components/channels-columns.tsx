@@ -1004,7 +1004,7 @@ export function useChannelsColumns(options: {
                     <TooltipContent side='top' className='max-w-xs'>
                       <div className='space-y-1 text-xs'>
                         {statusReason && (
-                          <div>
+                          <div className='wrap-anywhere'>
                             {t('Reason:')} {statusReason}
                           </div>
                         )}
