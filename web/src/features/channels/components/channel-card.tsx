@@ -49,9 +49,14 @@ type ChannelCardProps = {
   // The status cell is time-derived; changing this prop invalidates React.memo
   // even when TanStack Query structurally shares an otherwise unchanged row.
   availabilityNow: number
+  reorderEnabled?: boolean
 }
 
-function ChannelCardComponent({ row, isSelected }: ChannelCardProps) {
+function ChannelCardComponent({
+  row,
+  isSelected,
+  reorderEnabled = false,
+}: ChannelCardProps) {
   const { t } = useTranslation()
   const { sensitiveVisible } = useChannels()
   const isTagRow = isTagAggregateRow(row.original)
@@ -67,6 +72,7 @@ function ChannelCardComponent({ row, isSelected }: ChannelCardProps) {
 
   const groups = parseGroupsList(row.original.group ?? '')
 
+  const reorderCell = reorderEnabled ? renderCell('reorder') : null
   const selectCell = renderCell('select')
   const typeCell = renderCell('type')
   const nameCell = renderCell('name')
@@ -101,6 +107,7 @@ function ChannelCardComponent({ row, isSelected }: ChannelCardProps) {
         {/* Row 1: selection + type, with status badge + actions menu */}
         <div className='flex items-center justify-between gap-2'>
           <div className='flex min-w-0 flex-1 items-center gap-2'>
+            {reorderCell}
             {!isTagRow && selectCell && (
               <span className='shrink-0'>{selectCell}</span>
             )}
@@ -124,7 +131,10 @@ function ChannelCardComponent({ row, isSelected }: ChannelCardProps) {
               )}
               {nameCell}
             </div>
-            <div className='flex min-w-0 flex-col gap-1'>
+            <div
+              data-column-id='priority'
+              className='flex min-w-0 flex-col gap-1'
+            >
               <span className={labelClass}>{t('Priority')}</span>
               {priorityCell}
             </div>

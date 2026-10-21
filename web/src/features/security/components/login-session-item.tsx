@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import dayjs from '@/lib/dayjs'
+import { formatTimestampRelative } from '@/lib/format'
 import type { LoginSession } from '@/stores/auth-store'
 
 import { loginMethodLabel, sessionDevice } from './login-session-utils'
@@ -34,6 +35,7 @@ interface LoginSessionItemProps {
 
 export function LoginSessionItem({ session, onRevoke }: LoginSessionItemProps) {
   const { t } = useTranslation()
+  const locale = 'zh-CN'
   const maxTouchPoints =
     session.current && typeof navigator !== 'undefined'
       ? navigator.maxTouchPoints
@@ -64,7 +66,11 @@ export function LoginSessionItem({ session, onRevoke }: LoginSessionItemProps) {
         </p>
         <p className='text-muted-foreground mt-1 text-xs'>
           {t('Last active {{time}} · Expires {{expires}}', {
-            time: dayjs.unix(session.last_active_at).fromNow(),
+            time: formatTimestampRelative(
+              session.last_active_at,
+              'seconds',
+              locale
+            ),
             expires: dayjs.unix(session.expires_at).format('YYYY-MM-DD HH:mm'),
           })}
         </p>

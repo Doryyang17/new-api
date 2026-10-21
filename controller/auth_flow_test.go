@@ -884,7 +884,7 @@ func legacyGitHubBindingAudits(t *testing.T) ([]model.AuditLog, []string) {
 }
 
 func TestOAuthLoginLegacyGitHubBindingRequiresAccountEvidence(t *testing.T) {
-	const declined = "无法自动将该 GitHub 账户关联到现有账户，请使用其他方式登录或注册后，在账户设置中绑定 GitHub"
+	const declined = "This GitHub account cannot be linked to an existing account automatically, please sign in or register another way and then link GitHub in account settings"
 	tests := []struct {
 		name              string
 		existingGitHubID  string
@@ -1119,7 +1119,7 @@ func TestOAuthBindIgnoresLegacyGitHubUsernames(t *testing.T) {
 				return
 			}
 			assert.Equal(t, test.ownGitHubID, bound.GitHubId)
-			assert.Equal(t, "该 GitHub 账户已被绑定", result.Message)
+			assert.Equal(t, "This GitHub account has already been bound", result.Message)
 		})
 	}
 }

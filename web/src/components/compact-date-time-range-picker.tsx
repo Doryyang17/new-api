@@ -43,7 +43,7 @@ interface CompactDateTimeRangePickerProps {
 function toInputValue(date?: Date, timeZone?: string): string {
   if (!date) return ''
   const value = dayjs(date)
-  return (timeZone ? value.tz(timeZone) : value).format('YYYY-MM-DDTHH:mm')
+  return (timeZone ? value.tz(timeZone) : value).format('YYYY-MM-DDTHH:mm:ss')
 }
 
 function fromInputValue(value: string, timeZone?: string): Date | undefined {
@@ -66,20 +66,16 @@ export function CompactDateTimeRangePicker(
 
   const label = useMemo(() => {
     if (!props.start && !props.end) return t('Date Range')
-    // The popover's <input type="datetime-local"> only supports minute
-    // precision, so seconds are always 00 (manual pick) or 59 (preset
-    // end-of-day). Hide them in the trigger label to keep the button
-    // width compact while still showing the meaningful timestamp.
     const startValue = props.start ? dayjs(props.start) : null
     const endValue = props.end ? dayjs(props.end) : null
     const startText = startValue
       ? (props.timeZone ? startValue.tz(props.timeZone) : startValue).format(
-          'YYYY-MM-DD HH:mm'
+          'YYYY-MM-DD HH:mm:ss'
         )
       : '-'
     const endText = endValue
       ? (props.timeZone ? endValue.tz(props.timeZone) : endValue).format(
-          'YYYY-MM-DD HH:mm'
+          'YYYY-MM-DD HH:mm:ss'
         )
       : '-'
     return `${startText} ~ ${endText}`
@@ -172,6 +168,7 @@ export function CompactDateTimeRangePicker(
               </div>
               <Input
                 type='datetime-local'
+                step={1}
                 aria-label={t('Start Time')}
                 value={draftStart}
                 disabled={props.disabled}
@@ -188,6 +185,7 @@ export function CompactDateTimeRangePicker(
               </div>
               <Input
                 type='datetime-local'
+                step={1}
                 aria-label={t('End Time')}
                 value={draftEnd}
                 disabled={props.disabled}

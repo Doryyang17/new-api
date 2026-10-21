@@ -39,13 +39,13 @@ func ClaimUserLevel(c *gin.Context) {
 	message := "当前没有可领取的新等级"
 	if result.Changed {
 		message = "等级领取成功"
-		model.RecordLog(c.GetInt("id"), model.LogTypeSystem, fmt.Sprintf(
+		model.RecordLog(c.GetInt("id"), model.LogTypeSystem, common.NewMessage(fmt.Sprintf(
 			"领取用户等级：%s → %s，累计已结算消耗额度 %d，等级倍率 ×%.4g",
 			result.PreviousLevel.Name,
 			result.Status.CurrentLevel.Name,
 			result.Status.TotalConsumedQuota,
 			result.Status.CurrentLevel.Ratio,
-		))
+		)))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

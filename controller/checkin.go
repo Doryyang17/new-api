@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
@@ -34,10 +33,7 @@ func GetCheckinStatus(c *gin.Context) {
 
 	stats, err := model.GetUserCheckinStats(userId, month)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
+		common.ApiError(c, err)
 		return
 	}
 	activeBonus, err := model.GetActiveCheckinBonus(userId, time.Now())
@@ -74,7 +70,7 @@ func GetCheckinStatus(c *gin.Context) {
 func DoCheckin(c *gin.Context) {
 	setting := operation_setting.GetCheckinSetting()
 	if !setting.Enabled {
-		common.ApiErrorMsg(c, "签到功能未启用")
+		common.ApiErrorT(c, "Check-in feature is not enabled")
 		return
 	}
 
@@ -82,24 +78,17 @@ func DoCheckin(c *gin.Context) {
 
 	checkin, bonus, err := model.UserCheckin(userId)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
+		common.ApiError(c, err)
 		return
 	}
-	logContent := fmt.Sprintf("用户签到，获得额度 %s", logger.LogQuota(checkin.QuotaAwarded))
+	logContent := common.NewMessage("Daily check-in, received {{quota}}", map[string]any{"quota": logger.FormatQuota(checkin.QuotaAwarded)})
 	if bonus != nil {
-		logContent = fmt.Sprintf("用户签到，获得签到赠金 %s（当日有效）", logger.LogQuota(bonus.Amount))
+		logContent = common.NewMessage("用户签到，获得签到赠金 {{quota}}（当日有效）", map[string]any{"quota": logger.FormatQuota(bonus.Amount)})
 	}
 	model.RecordLog(userId, model.LogTypeSystem, logContent)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "签到成功",
-		"data": gin.H{
-			"quota_awarded": checkin.QuotaAwarded,
-			"checkin_date":  checkin.CheckinDate,
-			"bonus":         checkinBonusResponse(bonus),
-		},
+	common.ApiSuccessT(c, "Check-in successful", gin.H{
+		"quota_awarded": checkin.QuotaAwarded,
+		"checkin_date":  checkin.CheckinDate,
+		"bonus":         checkinBonusResponse(bonus),
 	})
 }

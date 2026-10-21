@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"github.com/QuantumNous/new-api/common"
 	"math/rand"
 	"time"
 
@@ -104,7 +105,7 @@ func userCheckinWithTransaction(checkin *Checkin, bonus *CheckinBonus, userId in
 		// 步骤1: 创建签到记录
 		// 数据库有唯一约束 (user_id, checkin_date)，可以防止并发重复签到
 		if err := tx.Create(checkin).Error; err != nil {
-			return errors.New("签到失败，请稍后重试")
+			return common.NewMessage("Check-in failed, please try again later")
 		}
 
 		// 步骤2: 仅余额签到模式增加用户额度；赠金模式保持 users.quota 不变。

@@ -51,7 +51,7 @@ func TestGetAllLogsHydratesMissingUsername(t *testing.T) {
 		Content:   "system curfew",
 	}).Error)
 
-	logs, total, err := GetAllLogs(LogTypeError, 0, 0, "", "", "", 0, 10, 0, "", "", "")
+	logs, total, err := GetAllLogs(LogFilter{Type: LogTypeError}, 0, 10)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, logs, 1)
@@ -73,7 +73,7 @@ func TestGetAllLogsUsernameFilterFindsLogByUserIdWhenUsernameMissing(t *testing.
 		Content:   "system curfew",
 	}).Error)
 
-	logs, total, err := GetAllLogs(LogTypeError, 0, 0, "", user.Username, "", 0, 10, 0, "", "", "")
+	logs, total, err := GetAllLogs(LogFilter{Type: LogTypeError, Username: user.Username}, 0, 10)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, logs, 1)
@@ -242,7 +242,7 @@ func TestRecordRequestGuardLogKeepsObservationAdminOnly(t *testing.T) {
 	assert.Equal(t, "99123", common.Interface2String(adminInfo["token_id"]))
 	assert.Equal(t, "probe-token", adminInfo["token_name"])
 
-	userLogs, total, err := GetUserLogs(user.Id, LogTypeError, 0, 0, "", "", 0, 10, "", "", "")
+	userLogs, total, err := GetUserLogs(user.Id, LogFilter{Type: LogTypeError}, 0, 10)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, total)
 	require.Len(t, userLogs, 1)

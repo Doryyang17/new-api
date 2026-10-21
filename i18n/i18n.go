@@ -78,14 +78,17 @@ func GetLocalizer(lang string) *i18n.Localizer {
 	return loc
 }
 
-// T translates a message key using the language from gin context
+// T translates a message key in the language the reader of the request stated
 func T(c *gin.Context, key string, args ...map[string]any) string {
-	lang := GetLangFromContext(c)
-	return Translate(lang, key, args...)
+	return Translate(StatedLang(c), key, args...)
 }
 
-// Translate translates a message key for the specified language
+// Translate translates a message key for the specified language. An empty
+// language means the reader stated none and gets common.DefaultLanguage.
 func Translate(lang, key string, args ...map[string]any) string {
+	if lang == "" {
+		lang = common.DefaultLanguage
+	}
 	loc := GetLocalizer(lang)
 
 	config := &i18n.LocalizeConfig{
@@ -112,6 +115,9 @@ var userLangLoaderFunc func(userId int) string
 func SetUserLangLoader(loader func(userId int) string) {
 	userLangLoaderFunc = loader
 }
+
+// StatedLang keeps new upstream callers on the only supported language.
+func StatedLang(c *gin.Context) string { return LangZhCN }
 
 // GetLangFromContext returns the only supported language for this fork.
 func GetLangFromContext(c *gin.Context) string {
