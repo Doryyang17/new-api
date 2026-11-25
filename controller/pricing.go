@@ -21,58 +21,43 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 
 	filtered := make([]model.Pricing, 0, len(pricing))
 	for _, item := range pricing {
-		if common.StringsContains(item.EnableGroup, "all") {
-			filtered = append(filtered, item)
-			continue
-		}
+		// The pricing cache is shared by all viewers.
+		groups := make([]string, 0, len(item.EnableGroup))
 		for _, group := range item.EnableGroup {
-			if _, ok := usableGroup[group]; ok {
-				filtered = append(filtered, item)
-				break
+			if _, ok := usableGroup[group]; ok || group == "all" {
+				groups = append(groups, group)
 			}
+		}
+		if len(groups) > 0 {
+			item.EnableGroup = groups
+			filtered = append(filtered, item)
 		}
 	}
 	return filtered
 }
 
 func GetPricing(c *gin.Context) {
-	pricing := model.GetPricing()
-	userId, exists := c.Get("id")
-	usableGroup := map[string]string{}
-	groupRatio := map[string]float64{}
-	baseGroupRatio := map[string]float64{}
-	for s, f := range ratio_setting.GetGroupRatioCopy() {
-		groupRatio[s] = f
-		baseGroupRatio[s] = f
-	}
-	var group string
-	var levelKey string
-	if exists {
-		group = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-		levelKey = common.GetContextKeyString(c, constant.ContextKeyUserLevel)
-		if group == "" {
-			user, err := model.GetUserCache(userId.(int))
-			if err == nil {
-				group = user.Group
-				levelKey = user.LevelKey
-			}
-		}
-		if group != "" {
-			for g := range groupRatio {
-				ratioInfo := service.ResolveUserGroupRatio(group, g, levelKey)
-				baseGroupRatio[g] = ratioInfo.BaseGroupRatio
-				groupRatio[g] = ratioInfo.GroupRatio
-			}
+	group := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	levelKey := common.GetContextKeyString(c, constant.ContextKeyUserLevel)
+	if userID := c.GetInt("id"); group == "" && userID > 0 {
+		if user, err := model.GetUserCache(userID); err == nil {
+			group, levelKey = user.Group, user.LevelKey
 		}
 	}
 
-	usableGroup = service.GetUserUsableGroups(group)
-	pricing = filterPricingByUsableGroups(pricing, usableGroup)
-	// check groupRatio contains usableGroup
-	for group := range ratio_setting.GetGroupRatioCopy() {
-		if _, ok := usableGroup[group]; !ok {
-			delete(groupRatio, group)
-			delete(baseGroupRatio, group)
+	usableGroup := service.GetUserUsableGroups(group)
+	pricing := filterPricingByUsableGroups(model.GetPricing(), usableGroup)
+	groupRatio := ratio_setting.GetGroupRatioCopy()
+	baseGroupRatio := make(map[string]float64, len(groupRatio))
+	for g, ratio := range groupRatio {
+		if _, ok := usableGroup[g]; !ok {
+			delete(groupRatio, g)
+			continue
+		}
+		baseGroupRatio[g] = ratio
+		if group != "" {
+			info := service.ResolveUserGroupRatio(group, g, levelKey)
+			baseGroupRatio[g], groupRatio[g] = info.BaseGroupRatio, info.GroupRatio
 		}
 	}
 	level := user_level_setting.ResolveBillingLevel(levelKey)

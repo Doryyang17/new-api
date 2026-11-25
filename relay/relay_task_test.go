@@ -16,6 +16,9 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
+	kittypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -488,6 +491,238 @@ func TestSharedTaskBillingExpressionSelectionAndFrozenSettlement(t *testing.T) {
 			assert.Equal(t, float64(2), info.TieredBillingSnapshot.UsageFacts[field])
 			assert.Equal(t, 2*info.TieredBillingSnapshot.EstimatedQuotaAfterGroup, result.ActualQuotaAfterGroup)
 			assert.Equal(t, tc.wantExpr, info.TieredBillingSnapshot.ExprString)
+		})
+	}
+}
+
+func TestSharedEndpointBillingKeepsOrdinaryAndPluginPricesSeparate(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	const taskExpr = `tier("images", u("image_count") * 0.05)`
+	const ordinaryExpr = `tier("images", fixed(0.04)) * image_count`
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices)) })
+	for _, tc := range []struct {
+		name, expression, override          string
+		ordinaryQuota, taskQuota, taskFinal int
+		wantError                           string
+		alias, shared, legacy               bool
+	}{
+		{name: "task usage price is rejected by ordinary relay", expression: taskExpr, taskQuota: 50000, taskFinal: 75000, wantError: "任务用量表达式"},
+		{name: "enum fallback cannot silently bill zero", expression: `u("output_image_type") == "2k" ? tier("2k", u("image_count") * 0.08) : tier("1k", 0.04)`, taskQuota: 20000, taskFinal: 20000, wantError: "任务用量表达式"},
+		{name: "unselected usage branch is rejected", expression: `true ? tier("flat", 0.04) : tier("images", u("image_count"))`, taskQuota: 20000, taskFinal: 20000, wantError: "任务用量表达式"},
+		{name: "dynamic usage key is rejected", expression: `tier("images", u(u("unit")) * 0.05)`, taskQuota: 50000, taskFinal: 75000, wantError: "任务用量表达式"},
+		{name: "plain task USD price is ambiguous", expression: `tier("flat", 0.04)`, taskQuota: 20000, taskFinal: 20000, wantError: "共用了计费表达式"},
+		{name: "alias retains task USD price", expression: `tier("flat", 0.04)`, taskQuota: 20000, taskFinal: 20000, wantError: "共用了计费表达式", alias: true},
+		{name: "per image relay and plugin overrides", expression: ordinaryExpr, override: taskExpr, ordinaryQuota: 40000, taskQuota: 50000, taskFinal: 75000},
+		{name: "mapped plugin override", expression: ordinaryExpr, override: taskExpr, ordinaryQuota: 40000, taskQuota: 50000, taskFinal: 75000, alias: true},
+		{name: "token relay and plugin overrides", expression: `tier("tokens", p * 2)`, override: taskExpr, ordinaryQuota: 1000, taskQuota: 50000, taskFinal: 75000},
+		{name: "ordinary constant has ordinary units with plugin override", expression: `tier("flat", 80000)`, override: taskExpr, ordinaryQuota: 40000, taskQuota: 50000, taskFinal: 75000},
+		{name: "another plugin still inherits task USD units", expression: `tier("flat", 0.04)`, override: taskExpr, taskQuota: 50000, taskFinal: 75000, wantError: "共用了计费表达式", shared: true},
+		{name: "legacy per image pricing stays shared", ordinaryQuota: 40000, taskQuota: 40000, legacy: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			saveBillingConfig(t)
+			name, mapping, mappedModel := "declared-model", "", ""
+			if tc.alias {
+				name, mapping, mappedModel = "alias-model", `{"alias-model":"declared-model"}`, "declared-model"
+			}
+			mode := billing_setting.BillingModeTieredExpr
+			if tc.legacy {
+				mode = billing_setting.BillingModeRatio
+			}
+			variants := map[string]string{}
+			if tc.override != "" {
+				variants["bill-fallback::declared-model"] = tc.override
+			}
+			modes, err := common.Marshal(map[string]string{name: mode})
+			require.NoError(t, err)
+			expressions, err := common.Marshal(map[string]string{name: tc.expression})
+			require.NoError(t, err)
+			overrides, err := common.Marshal(variants)
+			require.NoError(t, err)
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+				"billing_setting.billing_mode": string(modes), "billing_setting.billing_expr": string(expressions),
+				billing_setting.PluginBillingExprOption: string(overrides), "group_ratio_setting.group_ratio": `{"default":1}`,
+			}))
+			prices, err := common.Marshal(map[string]float64{name: 0.04})
+			require.NoError(t, err)
+			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(string(prices)))
+			registry := pluginruntime.NewRegistry()
+			source := strings.Replace(billingFallbackPlugin, `fetchMode:"per_task"`, `fetchMode:"per_task",usageSchema:{image_count:{type:"number",unit:"count",description:"Image generation unit price"},output_image_type:{enum:["1k","2k"]},unit:{enum:["image_count"]}}`, 1)
+			source += `export function extractUsage(){return {image_count:2,output_image_type:"1k",unit:"image_count"};}`
+			plugin, err := registry.Register(source, pluginruntime.Options{})
+			require.NoError(t, err)
+			candidates := []pluginruntime.ProtocolBinding{{Plugin: plugin}}
+			if tc.shared {
+				other, err := registry.Register(strings.ReplaceAll(source, "bill-fallback", "other-images"), pluginruntime.Options{})
+				require.NoError(t, err)
+				candidates = append(candidates, pluginruntime.ProtocolBinding{Plugin: other})
+			}
+			ordinaryContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ordinaryContext.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+			ordinaryContext.Request.Header.Set("Accept-Language", "en")
+			ordinaryContext.Set(pluginruntime.ContextKeyRelayEndpoint, pluginruntime.PinnedEndpoint{Generation: registry.Generation(), Model: name, MappedModel: mappedModel, Candidates: candidates})
+			ordinary := &relaycommon.RelayInfo{
+				OriginModelName: name, UserGroup: "default", UsingGroup: "default", RelayFormat: kittypes.RelayFormatOpenAIImage,
+				Request: &kitdto.ImageRequest{Model: name, N: common.GetPointer(uint(2))}, BillingRequestInput: &billingexpr.RequestInput{},
+			}
+			ordinaryPrice, err := helper.ModelPriceHelper(ordinaryContext, ordinary, 1000, &kittypes.TokenCountMeta{})
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				assert.Nil(t, ordinary.TieredBillingSnapshot)
+				assert.Nil(t, ordinary.Billing, "pricing must fail before reservation")
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.ordinaryQuota, ordinaryPrice.QuotaToPreConsume)
+			}
+
+			pluginContext, task := newTaskSubmitContext(t, name, mapping)
+			pluginContext.Set("group", "default")
+			pluginContext.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Generation: registry.Generation(), Plugin: plugin})
+			task.OriginModelName, task.UserGroup, task.UsingGroup = name, "default", "default"
+			_, taskErr := RelayTaskSubmit(pluginContext, task)
+			require.NotNil(t, taskErr) // This fixture stops at reservation, before upstream submission.
+			assert.NotEqual(t, "model_price_error", taskErr.Code)
+			assert.Equal(t, tc.taskQuota, task.PriceData.Quota)
+			if tc.legacy {
+				assert.Nil(t, task.TieredBillingSnapshot)
+				assert.Nil(t, ordinary.TieredBillingSnapshot)
+				return
+			}
+			require.NotNil(t, task.TieredBillingSnapshot)
+			assert.True(t, task.TieredBillingSnapshot.TaskUsageBilling)
+			// Updating live prices must not change either in-flight meter.
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+				"billing_setting.billing_expr": `{}`, billing_setting.PluginBillingExprOption: `{}`,
+			}))
+			settlement, _, err := service.EvaluateTaskCompletionUsage(task.TieredBillingSnapshot, map[string]any{"image_count": float64(3)})
+			require.NoError(t, err)
+			assert.Equal(t, tc.taskFinal, settlement.ActualQuotaAfterGroup)
+			if tc.wantError != "" {
+				return
+			}
+			require.NotNil(t, ordinary.TieredBillingSnapshot)
+			assert.False(t, ordinary.TieredBillingSnapshot.TaskUsageBilling)
+			settlement, err = billingexpr.ComputeTieredQuotaWithRequest(ordinary.TieredBillingSnapshot, billingexpr.TokenParams{P: 1000, Len: 1000}, *ordinary.BillingRequestInput)
+			require.NoError(t, err)
+			assert.Equal(t, tc.ordinaryQuota, settlement.ActualQuotaAfterGroup)
+		})
+	}
+}
+
+// One plugin serves a model on chat paths and as a task. The model-level price
+// prices both only when it is per call or reads usage facts; otherwise tasks
+// need the plugin's own price. Chat request quantities (token counts, bare
+// image_count) never price a task, for any model.
+func TestRelayTaskSubmitPricesModelsAPluginAlsoRelays(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	const chatRoute = `[{incoming_path:"/v1/chat/completions",upstream_path:"/v1/chat/completions"}]`
+	const tokenExpr = `tier("tokens", p * 2 + c * 8)`
+	const usageExpr = `tier("seconds", u("seconds") * 0.3)`
+	const notConfigured = "模型 declared-model 没有插件 bill-fallback 的任务价格"
+	savedPrices, savedRatios := ratio_setting.ModelPrice2JSONString(), ratio_setting.ModelRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(savedRatios))
+	})
+	for _, tc := range []struct {
+		name, relay, price, ratio, expr, override string
+		// The chat side is checked when chatQuota or chatErr is set.
+		chatQuota         int
+		chatErr           string
+		taskErr, taskExpr string
+		taskQuota         int
+	}{
+		{name: "per-call price prices chat and tasks", relay: chatRoute, price: "0.04", chatQuota: 20000, taskQuota: 40000},
+		{name: "token ratio alone leaves tasks unpriced", relay: chatRoute, ratio: "10", chatQuota: 10000, taskErr: notConfigured},
+		{name: "token expression is the chat price", relay: chatRoute, expr: tokenExpr, chatQuota: 1000, taskErr: notConfigured},
+		{name: "constant expression is the chat price", relay: chatRoute, expr: `tier("flat", 0.04)`, taskErr: notConfigured},
+		{name: "usage expression prices tasks only", relay: chatRoute, expr: usageExpr, chatErr: "任务用量表达式", taskExpr: usageExpr, taskQuota: 300000},
+		{name: "plugin price splits a chat price", relay: chatRoute, expr: tokenExpr, override: usageExpr, chatQuota: 1000, taskExpr: usageExpr, taskQuota: 300000},
+		{name: "plugin price splits a token ratio", relay: chatRoute, ratio: "10", override: usageExpr, taskExpr: usageExpr, taskQuota: 300000},
+		{name: "plugin price reading token counts is rejected", expr: usageExpr, override: `tier("tokens", p * 2 + u("seconds"))`, taskErr: notConfigured},
+		{name: "task model token expression no longer bills zero", expr: tokenExpr, taskErr: notConfigured},
+		// image_count is the chat request's image count: a task would read 1.
+		{name: "task model image count expression no longer bills one image", expr: `tier("images", image_count * 0.04)`, taskErr: notConfigured},
+		{name: "plugin price reading image count is rejected", expr: usageExpr, override: `tier("images", image_count * 0.04 + u("seconds"))`, taskErr: notConfigured},
+		{name: "task model token ratio keeps the legacy per-call price", ratio: "10", taskQuota: 5000000},
+		{name: "task model constant expression is a task price", expr: `tier("flat", 0.04)`, taskExpr: `tier("flat", 0.04)`, taskQuota: 20000},
+		{name: "model list route does not relay the model", relay: `[{incoming_path:"/v1/models",upstream_path:"/v1/models"}]`, ratio: "10", taskQuota: 5000000},
+		{name: "route for other models does not relay this one", relay: `[{incoming_path:"/v1/chat/completions",upstream_path:"/v1/chat/completions",models:["other-model"]}]`, expr: `tier("flat", 0.04)`, taskExpr: `tier("flat", 0.04)`, taskQuota: 20000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			saveBillingConfig(t)
+			modes, expressions, overrides := map[string]string{}, map[string]string{}, map[string]string{}
+			if tc.expr != "" {
+				modes["declared-model"], expressions["declared-model"] = billing_setting.BillingModeTieredExpr, tc.expr
+			}
+			if tc.override != "" {
+				overrides["bill-fallback::declared-model"] = tc.override
+			}
+			options := map[string]string{"group_ratio_setting.group_ratio": `{"default":1}`}
+			for key, value := range map[string]map[string]string{"billing_setting.billing_mode": modes, "billing_setting.billing_expr": expressions, billing_setting.PluginBillingExprOption: overrides} {
+				encoded, err := common.Marshal(value)
+				require.NoError(t, err)
+				options[key] = string(encoded)
+			}
+			require.NoError(t, config.GlobalConfig.LoadFromDB(options))
+			prices, ratios := `{}`, `{}`
+			if tc.price != "" {
+				prices = `{"declared-model":` + tc.price + `}`
+			}
+			if tc.ratio != "" {
+				ratios = `{"declared-model":` + tc.ratio + `}`
+			}
+			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(prices))
+			require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(ratios))
+			meta := `fetchMode:"per_task",usageSchema:{seconds:{type:"number",unit:"second"}}`
+			if tc.relay != "" {
+				meta += `,relay:` + tc.relay
+			}
+			source := strings.Replace(billingFallbackPlugin, `fetchMode:"per_task"`, meta, 1) + `export function extractUsage(){return {seconds:2};}`
+			registry := pluginruntime.NewRegistry()
+			plugin, err := registry.Register(source, pluginruntime.Options{})
+			require.NoError(t, err)
+
+			if tc.chatQuota != 0 || tc.chatErr != "" {
+				chatContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+				chatContext.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+				chatContext.Request.Header.Set("Accept-Language", "en")
+				chat := &relaycommon.RelayInfo{
+					OriginModelName: "declared-model", UserGroup: "default", UsingGroup: "default", RelayFormat: kittypes.RelayFormatOpenAI,
+					Request: &kitdto.GeneralOpenAIRequest{Model: "declared-model"}, BillingRequestInput: &billingexpr.RequestInput{},
+				}
+				chatPrice, err := helper.ModelPriceHelper(chatContext, chat, 1000, &kittypes.TokenCountMeta{})
+				if tc.chatErr != "" {
+					require.ErrorContains(t, err, tc.chatErr)
+				} else {
+					require.NoError(t, err)
+					assert.Equal(t, tc.chatQuota, chatPrice.QuotaToPreConsume)
+				}
+			}
+
+			c, info := newTaskSubmitContext(t, "declared-model", "")
+			c.Request.Header.Set("Accept-Language", "en")
+			c.Set("group", "default")
+			c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Generation: registry.Generation(), Plugin: plugin})
+			info.OriginModelName, info.UserGroup, info.UsingGroup = "declared-model", "default", "default"
+			_, taskErr := RelayTaskSubmit(c, info)
+			require.NotNil(t, taskErr) // This fixture stops at reservation, before upstream submission.
+			if tc.taskErr != "" {
+				assert.Equal(t, "model_price_error", taskErr.Code)
+				assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+				assert.Contains(t, taskErr.Message, tc.taskErr)
+				assert.Nil(t, info.TieredBillingSnapshot)
+				return
+			}
+			assert.NotEqual(t, "model_price_error", taskErr.Code, "submission error: %+v", taskErr)
+			assert.Equal(t, tc.taskQuota, info.PriceData.Quota)
+			if tc.taskExpr == "" {
+				assert.Nil(t, info.TieredBillingSnapshot)
+				return
+			}
+			require.NotNil(t, info.TieredBillingSnapshot)
+			assert.Equal(t, tc.taskExpr, info.TieredBillingSnapshot.ExprString)
 		})
 	}
 }

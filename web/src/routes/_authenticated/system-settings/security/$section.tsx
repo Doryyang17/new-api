@@ -28,6 +28,7 @@ export const Route = createFileRoute(
   '/_authenticated/system-settings/security/$section'
 )({
   beforeLoad: ({ params }) => {
+    // Keep the fork’s existing prompt filter settings entry point.
     if (params.section === 'sensitive-words') {
       throw redirect({
         to: '/system-settings/custom/$section',

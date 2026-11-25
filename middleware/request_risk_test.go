@@ -4,12 +4,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	appI18n "github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	builtinplugins "github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
@@ -354,7 +356,9 @@ func newJimengRequestRiskTestEngine(t *testing.T, userID int, tokenID int, handl
 	require.NoError(t, err)
 	plugin := compileTaskRoutePlugin(t, string(source))
 	plugin.Meta.Models = []string{"jimeng-test", "jimeng-a", "jimeng-b", "jimeng-c", "jimeng-d"}
-	engine.Use(pinTaskPluginRoute(plugin, 0), PrepareTaskPluginRoute())
+	routeIndex := slices.IndexFunc(plugin.Meta.Routes, func(route jsplugin.Route) bool { return route.Path == "/jimeng/" })
+	require.NotEqual(t, -1, routeIndex)
+	engine.Use(pinTaskPluginRoute(plugin, routeIndex), PrepareTaskPluginRoute())
 	engine.POST("/jimeng/", func(c *gin.Context) {
 		if rejection := ApplyRequestProtection(c); rejection != nil {
 			WriteRequestProtectionResponse(c, rejection)
